@@ -29,7 +29,9 @@ import {
   Search,
   KeyRound,
   BarChart3,
-  Zap
+  Zap,
+  Bot,
+  Cpu
 } from 'lucide-react';
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
 
@@ -95,6 +97,11 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
 
+  // 🤖 AI Automatic Bot (Single-Scan Auto-Guard) State
+  const [aiBotMode, setAiBotMode] = useState<'single_shot' | 'smart_guard'>('single_shot');
+  const [aiBotStatus, setAiBotStatus] = useState<string>('🟢 AI Bot: Active • Ready for Student Pass');
+  const [aiBotLastAction, setAiBotLastAction] = useState<string>('Bot standby - 1 scan only');
+
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const scannerContainerId = 'qr-reader';
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -105,6 +112,15 @@ export default function App() {
   const handleQrCodeSuccessRef = useRef<(text: string) => void>(() => {});
   const isCameraActiveRef = useRef<boolean>(false);
   const autoStopOnScanRef = useRef<boolean>(true);
+
+  // 🤖 AI Bot Hardware & Memory Locks
+  const aiBotModeRef = useRef<'single_shot' | 'smart_guard'>('single_shot');
+  const isHardLockedRef = useRef<boolean>(false);
+  const aiBotLockedCodeRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    aiBotModeRef.current = aiBotMode;
+  }, [aiBotMode]);
 
   useEffect(() => {
     autoStopOnScanRef.current = autoStopOnScan;
@@ -186,6 +202,28 @@ export default function App() {
     } catch {
       // Ignore vibration error
     }
+  };
+
+  // 🤖 AI Bot Digital Confirmation Chime
+  const playAiBotChime = () => {
+    if (!soundEnabled) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      [880, 1320, 1760].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.05);
+        gain.gain.setValueAtTime(0.2, now + idx * 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.14);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.05);
+        osc.stop(now + idx * 0.05 + 0.14);
+      });
+    } catch {}
   };
 
   // Handle Student Registration
@@ -386,7 +424,7 @@ export default function App() {
     setScanBanner(null);
   };
 
-  // QR Scanning Logic with Anti-Repeat Lock & Instant Stop
+  // QR Scanning Logic with AI Automatic Bot Anti-Repeat Lock & Instant Stop
   const handleNextScan = async () => {
     if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
     try {
@@ -394,41 +432,52 @@ export default function App() {
         (html5QrCodeRef.current as any).resume();
       }
     } catch {}
+    isHardLockedRef.current = false;
     isScanningLockedRef.current = false;
     setIsCooldown(false);
+    aiBotLockedCodeRef.current = null;
     lastScannedCodeRef.current = null;
     lastScannedTimeRef.current = 0;
     setScanBanner(null);
+    setAiBotStatus('🟢 AI Bot: Active • Ready for Student Pass');
+    setAiBotLastAction('Scanner reset for next student');
 
     // If camera was stopped, start camera for next student pass
-    if (!isCameraActiveRef.current && autoStopOnScanRef.current) {
+    if (!isCameraActiveRef.current) {
       await startCamera();
     }
   };
 
   const handleQrCodeSuccess = async (decodedText: string) => {
-    // 1. If scanner is currently in locked cooldown, drop incoming frame
-    if (isScanningLockedRef.current) return;
+    // 1. HARD SYNCHRONOUS LOCK: If already processing or locked, drop frame instantly
+    if (isHardLockedRef.current) return;
 
-    // 2. Prevent repeating duplicate alerts if the same QR is still held in front of camera
-    if (
-      lastScannedCodeRef.current === decodedText &&
-      Date.now() - lastScannedTimeRef.current < 8000
-    ) {
+    // 2. 🤖 AI BOT ANTI-REPEAT SHIELD:
+    // If camera is still pointed at the exact same QR code, the AI Bot drops it unconditionally!
+    // No repeat beep, no duplicate trigger loop as long as QR is held in front of camera
+    if (aiBotLockedCodeRef.current === decodedText) {
       return;
     }
 
-    // Immediately lock to prevent concurrent frames from triggering
-    isScanningLockedRef.current = true;
+    // Immediately lock synchronously
+    isHardLockedRef.current = true;
+    aiBotLockedCodeRef.current = decodedText;
     lastScannedCodeRef.current = decodedText;
     lastScannedTimeRef.current = Date.now();
+    isScanningLockedRef.current = true;
     setIsCooldown(true);
 
-    // USER REQUIREMENT: "ekdam minus second camera qr dekhte hi scan and band"
-    // Turn off camera right away so it stops immediately without continuous looping
-    if (autoStopOnScanRef.current) {
+    // AI Bot digital chime
+    playAiBotChime();
+
+    // In Single-Shot mode (default) OR autoStopOnScan:
+    // KILL camera immediately so it stops dead
+    if (aiBotModeRef.current === 'single_shot' || autoStopOnScanRef.current) {
+      setAiBotStatus('🛡️ AI Bot: 1-Shot Captured! Camera auto-stopped.');
+      setAiBotLastAction('1 Scan Captured • Camera Off');
       await stopCamera();
     } else {
+      setAiBotStatus('🤖 AI Bot: Pass locked • Auto-ignoring repeat scans');
       try {
         if (html5QrCodeRef.current && (html5QrCodeRef.current as any).pause) {
           (html5QrCodeRef.current as any).pause(true);
@@ -457,13 +506,14 @@ export default function App() {
         setScanBanner({
           type: 'duplicate',
           message: '⚠️ Pehle hi entry ho chuki hai!',
-          subMessage: `(Scanned at ${existing.scannedAt})`,
+          subMessage: `(Scanned at ${existing.scannedAt}) • 🤖 AI Bot duplicate guard`,
           details: {
             name: existing.name,
             roll: existing.roll,
             time: existing.scannedAt
           }
         });
+        setAiBotLastAction(`Duplicate Blocked: ${existing.name} (${existing.roll})`);
       } else {
         // NEW VALID ENTRY
         const newRecord: EntryRecord = {
@@ -481,8 +531,8 @@ export default function App() {
         playSuccessSound();
         triggerVibration([100, 50, 100]);
         confetti({
-          particleCount: 40,
-          spread: 50,
+          particleCount: 45,
+          spread: 55,
           origin: { y: 0.5 }
         });
 
@@ -497,6 +547,7 @@ export default function App() {
             time: newRecord.scannedAt
           }
         });
+        setAiBotLastAction(`Entry Confirmed: ${studentNameScanned} (${scannedRoll})`);
       }
     } catch {
       playDuplicateWarningSound();
@@ -504,10 +555,10 @@ export default function App() {
         type: 'invalid',
         message: '❌ Invalid QR code'
       });
+      setAiBotLastAction('Invalid QR Format Blocked');
     }
 
-    if (!autoStopOnScanRef.current) {
-      // Cooldown 2.5 seconds before unlocking for the next person in continuous mode
+    if (aiBotModeRef.current === 'smart_guard' && !autoStopOnScanRef.current) {
       if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
       cooldownTimerRef.current = setTimeout(() => {
         try {
@@ -515,8 +566,11 @@ export default function App() {
             (html5QrCodeRef.current as any).resume();
           }
         } catch {}
+        // Release hard lock for NEW QR codes, but aiBotLockedCodeRef continues holding this QR!
+        isHardLockedRef.current = false;
         isScanningLockedRef.current = false;
         setIsCooldown(false);
+        setAiBotStatus('🤖 AI Bot: Ready for NEXT pass (same QR still blocked)');
       }, 2500);
     }
   };
@@ -576,6 +630,29 @@ export default function App() {
   };
 
   const stopCamera = async () => {
+    // 1. Force hardware-level track shutdown immediately on any running video element
+    try {
+      const container = document.getElementById(scannerContainerId);
+      if (container) {
+        const videos = container.querySelectorAll('video');
+        videos.forEach((video) => {
+          if (video.srcObject) {
+            const stream = video.srcObject as MediaStream;
+            stream.getTracks().forEach((track) => {
+              try {
+                track.stop();
+                track.enabled = false;
+              } catch {}
+            });
+            video.srcObject = null;
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Hardware stream cutoff error', e);
+    }
+
+    // 2. Stop html5QrCode instance
     if (html5QrCodeRef.current) {
       try {
         if (html5QrCodeRef.current.isScanning) {
@@ -583,7 +660,7 @@ export default function App() {
         }
         html5QrCodeRef.current.clear();
       } catch (e) {
-        console.error('Stop camera failed', e);
+        // Safe to ignore if stopped mid-frame since hardware tracks are already dead
       }
     }
     isCameraActiveRef.current = false;
@@ -1019,6 +1096,72 @@ export default function App() {
             {/* TAB 1: SCANNER TAB */}
             {adminTab === 'scanner' && (
               <div className="space-y-5">
+                {/* 🤖 AI Automatic Bot Sentinel Banner */}
+                <div className="glass-card rounded-2xl p-4 sm:p-5 border border-indigo-500/40 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/40 shadow-xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-72 h-32 bg-gradient-to-l from-purple-500/10 via-pink-500/10 to-transparent pointer-events-none rounded-full blur-2xl" />
+                  
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative z-10">
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/30">
+                          <Bot className="w-7 h-7 animate-pulse" />
+                        </div>
+                        <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-slate-900 shadow-sm" />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-1.5">
+                            <span>🤖 AI Automatic Scan Bot</span>
+                          </h4>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                            {aiBotMode === 'single_shot' ? 'Strict 1-Scan (Auto-Off)' : 'Smart Filter: Ignore Same QR'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300 font-medium mt-0.5 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-ping" />
+                          <span>{aiBotStatus}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                      {/* AI Bot Mode Selector */}
+                      <button
+                        onClick={() => {
+                          const next = aiBotMode === 'single_shot' ? 'smart_guard' : 'single_shot';
+                          setAiBotMode(next);
+                          setAutoStopOnScan(next === 'single_shot');
+                          setAiBotStatus(
+                            next === 'single_shot'
+                              ? '🟢 AI Bot: 1-Shot Mode ON (QR dekhte hi 1 scan & camera auto-band)'
+                              : '🛡️ AI Bot: Smart Filter ON (Same QR block rahega, naya QR lega)'
+                          );
+                        }}
+                        title="AI Bot Mode Switch"
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                          aiBotMode === 'single_shot'
+                            ? 'bg-purple-600/30 text-purple-200 border-purple-500/50 shadow-sm'
+                            : 'bg-indigo-600/30 text-indigo-200 border-indigo-500/50'
+                        }`}
+                      >
+                        <Zap className="w-3.5 h-3.5 text-pink-400" />
+                        <span>{aiBotMode === 'single_shot' ? '⚡ 1-Scan & Auto-Band' : '🛡️ Smart Anti-Loop'}</span>
+                      </button>
+
+                      {/* Ready Next Student Scan */}
+                      <button
+                        onClick={handleNextScan}
+                        title="Agla student pass scan karne ke liye taiyaar karein"
+                        className="px-3.5 py-1.5 rounded-xl gradient-party text-white font-bold text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Agla Pass ➔</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Real-time Scan Result Banner */}
                 {scanBanner && (
                   <div
@@ -1040,6 +1183,11 @@ export default function App() {
                       )}
 
                       <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-white flex items-center gap-1">
+                            <Bot className="w-3 h-3 text-pink-300" /> AI Bot Verified
+                          </span>
+                        </div>
                         <h4 className="text-base sm:text-lg font-extrabold leading-snug">
                           {scanBanner.message}
                         </h4>
@@ -1066,21 +1214,10 @@ export default function App() {
 
                     <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-[11px] text-slate-200">
-                        {autoStopOnScan ? (
-                          <span className="text-pink-300 font-semibold flex items-center gap-1.5">
-                            <Zap className="w-3.5 h-3.5 text-pink-400" />
-                            <span>⚡ Scan complete! Camera turant band ho gaya hai.</span>
-                          </span>
-                        ) : isCooldown ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-pink-400" />
-                            <span>Scan safalta-purvak ho gaya! Agle pass ke liye taiyaar...</span>
-                          </>
-                        ) : (
-                          <span className="text-emerald-300 font-semibold flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Ready to scan next pass
-                          </span>
-                        )}
+                        <span className="text-pink-300 font-semibold flex items-center gap-1.5">
+                          <Bot className="w-3.5 h-3.5 text-pink-400" />
+                          <span>🤖 AI Bot: 1-Shot Lock lag chuka hai. Repeat scan nahi hoga!</span>
+                        </span>
                       </div>
 
                       <button
@@ -1099,30 +1236,23 @@ export default function App() {
                 <div className="glass-card rounded-2xl p-4 sm:p-6 border border-purple-500/20 shadow-2xl relative">
                   <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                     <div className="flex items-center gap-2">
-                      <Camera className="w-5 h-5 text-pink-400" />
-                      <h3 className="font-bold text-white text-base sm:text-lg">Live QR Code Scanner</h3>
-                      {isCameraActive && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                          Active
-                        </span>
-                      )}
+                      <div className="w-8 h-8 rounded-lg bg-pink-500/20 border border-pink-500/40 flex items-center justify-center text-pink-400">
+                        <Bot className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-white text-base sm:text-lg flex items-center gap-2">
+                          <span>AI Smart Scanner</span>
+                          {isCameraActive && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              Camera Active
+                            </span>
+                          )}
+                        </h3>
+                        <p className="text-[11px] text-slate-400">Strict Single-Scan Engine (No Repeat Loop)</p>
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* Scan & Band Mode Toggle */}
-                      <button
-                        onClick={() => setAutoStopOnScan(!autoStopOnScan)}
-                        title={autoStopOnScan ? 'Scan & Band Mode Active (QR dekhte hi scan aur camera band)' : 'Continuous Mode'}
-                        className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer ${
-                          autoStopOnScan
-                            ? 'bg-pink-500/20 text-pink-300 border-pink-500/40 shadow-sm'
-                            : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}
-                      >
-                        <Zap className="w-3.5 h-3.5 text-pink-400" />
-                        <span className="font-semibold">{autoStopOnScan ? '⚡ Scan & Band: ON' : 'Continuous Mode'}</span>
-                      </button>
-
                       {/* Audio beep mute/unmute */}
                       <button
                         onClick={() => setSoundEnabled(!soundEnabled)}
@@ -1161,7 +1291,13 @@ export default function App() {
 
                     {/* Laser Overlay when active */}
                     {isCameraActive && (
-                      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                        {/* Top AI Bot HUD indicator */}
+                        <div className="absolute top-3 px-3 py-1 rounded-full bg-slate-950/80 border border-pink-500/50 backdrop-blur-md flex items-center gap-2 text-[11px] text-pink-300 font-bold shadow-lg">
+                          <Bot className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
+                          <span>AI BOT GUARD: 1-SHOT ARMED (No Duplicate Loop)</span>
+                        </div>
+
                         <div className="relative w-64 h-64 border-2 border-dashed border-pink-500/60 rounded-2xl">
                           <div className="absolute w-full h-0.5 bg-gradient-to-r from-transparent via-pink-400 to-transparent shadow-[0_0_8px_#ec4899] scanner-laser" />
                           {/* Corner Markers */}
@@ -1178,27 +1314,26 @@ export default function App() {
                       <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/95 z-10 animate-in fade-in duration-200">
                         {scanBanner ? (
                           <div className="max-w-md w-full flex flex-col items-center">
-                            <div
-                              className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-3 shadow-lg ${
-                                scanBanner.type === 'duplicate'
-                                  ? 'bg-red-500/20 text-red-400 border border-red-500/40 shadow-red-950/50'
-                                  : scanBanner.type === 'success'
-                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-emerald-950/50'
-                                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-amber-950/50'
-                              }`}
-                            >
-                              {scanBanner.type === 'duplicate' ? (
-                                <AlertTriangle className="w-9 h-9 animate-bounce" />
-                              ) : scanBanner.type === 'success' ? (
-                                <CheckCircle2 className="w-9 h-9" />
-                              ) : (
-                                <XCircle className="w-9 h-9" />
-                              )}
+                            <div className="relative mb-3">
+                              <div
+                                className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg ${
+                                  scanBanner.type === 'duplicate'
+                                    ? 'bg-red-500/20 text-red-400 border border-red-500/40 shadow-red-950/50'
+                                    : scanBanner.type === 'success'
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-emerald-950/50'
+                                    : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-amber-950/50'
+                                }`}
+                              >
+                                <Bot className="w-9 h-9 animate-bounce" />
+                              </div>
+                              <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-black shadow">
+                                ✓
+                              </span>
                             </div>
 
-                            <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30 mb-2">
-                              <Zap className="w-3 h-3 text-pink-400" />
-                              <span>⚡ Instant Scan Done • Camera Band</span>
+                            <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 mb-2">
+                              <Bot className="w-3.5 h-3.5 text-pink-400" />
+                              <span>🤖 AI Bot: 1-Shot Lock • Camera Band</span>
                             </div>
 
                             <h4 className="text-lg sm:text-xl font-extrabold text-white mb-1">
@@ -1212,12 +1347,16 @@ export default function App() {
                             </h4>
 
                             {scanBanner.details && (
-                              <div className="text-xs text-slate-300 font-mono mb-4 bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-800 flex items-center gap-3">
+                              <div className="text-xs text-slate-300 font-mono mb-2 bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-800 flex items-center gap-3">
                                 <span>Roll: <strong className="text-pink-300">{scanBanner.details.roll}</strong></span>
                                 <span className="text-slate-600">•</span>
                                 <span className="text-slate-400">Time: {scanBanner.details.time}</span>
                               </div>
                             )}
+
+                            <p className="text-[11px] text-slate-400 max-w-sm text-center mb-4">
+                              AI Bot ne QR detect karke sirf 1 baar scan kiya aur camera band kar diya hai taaki jab tak camera QR ke samne rahe repeat scan na ho.
+                            </p>
 
                             <button
                               onClick={handleNextScan}
@@ -1230,11 +1369,11 @@ export default function App() {
                         ) : (
                           <>
                             <div className="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-3">
-                              <CameraOff className="w-8 h-8" />
+                              <Bot className="w-8 h-8" />
                             </div>
-                            <h4 className="text-base font-bold text-white mb-1">Camera Abhi Off Hai</h4>
+                            <h4 className="text-base font-bold text-white mb-1">🤖 AI Bot Standby • Camera Off</h4>
                             <p className="text-xs text-slate-400 max-w-sm mb-4">
-                              Student ka QR ticket scan karne ke liye camera start karein. QR dekhte hi instant scan ho kar camera auto-band ho jayega.
+                              Student ka QR ticket scan karne ke liye camera start karein. AI Bot QR dekhte hi sirf 1 baar scan karega aur camera auto-band kar dega.
                             </p>
                             <button
                               onClick={startCamera}

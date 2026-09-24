@@ -831,16 +831,20 @@
       }
     }
 
-    // QR SCANNING LOGIC with Anti-Repeat Lock & Instant Stop
+    let aiBotLockedCode = null;
+
+    // QR SCANNING LOGIC with AI Bot Anti-Repeat Lock & Instant Stop
     async function onScanSuccess(decodedText) {
       if (isScanningLocked) return;
 
-      // Prevent re-scanning same QR code while held in camera frame
-      if (lastScannedText === decodedText && (Date.now() - lastScannedTime < 8000)) {
+      // 🤖 AI BOT ANTI-REPEAT SHIELD:
+      // If camera is still pointed at the same QR code, drop it unconditionally
+      if (aiBotLockedCode === decodedText) {
         return;
       }
 
       isScanningLocked = true;
+      aiBotLockedCode = decodedText;
       lastScannedText = decodedText;
       lastScannedTime = Date.now();
       isScanningCooldown = true;
@@ -928,6 +932,7 @@
           } catch (e) {}
           isScanningLocked = false;
           isScanningCooldown = false;
+          // Notice: aiBotLockedCode remains set so same QR stays blocked!
         }, 2500);
       }
     }
@@ -941,6 +946,7 @@
       } catch (e) {}
       isScanningLocked = false;
       isScanningCooldown = false;
+      aiBotLockedCode = null;
       lastScannedText = null;
       lastScannedTime = 0;
       document.getElementById('scanResultBanner').classList.add('hidden');
@@ -1000,6 +1006,22 @@
     }
 
     async function stopScanner() {
+      // Direct hardware cutoff
+      try {
+        const container = document.getElementById('reader');
+        if (container) {
+          const videos = container.querySelectorAll('video');
+          videos.forEach(v => {
+            if (v.srcObject) {
+              v.srcObject.getTracks().forEach(t => {
+                try { t.stop(); t.enabled = false; } catch (e) {}
+              });
+              v.srcObject = null;
+            }
+          });
+        }
+      } catch (e) {}
+
       if (html5QrScanner) {
         try {
           if (html5QrScanner.isScanning) {
