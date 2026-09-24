@@ -333,6 +333,15 @@
 
             <div class="flex items-center gap-2">
               <button
+                onclick="toggleAutoStop()"
+                id="autoStopToggleBtn"
+                class="px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer bg-pink-500/20 text-pink-300 border-pink-500/40"
+              >
+                <i data-lucide="zap" class="w-3.5 h-3.5 text-pink-400"></i>
+                <span id="autoStopLabel">⚡ Scan & Band: ON</span>
+              </button>
+
+              <button
                 onclick="toggleSound()"
                 id="soundToggleBtn"
                 class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1.5 transition cursor-pointer"
@@ -531,6 +540,7 @@
     let entries = [];
     let html5QrScanner = null;
     let isCameraActive = false;
+    let autoStopOnScan = true;
     let cameraFacing = 'environment';
     let isScanningCooldown = false;
     let isScanningLocked = false;
@@ -808,8 +818,21 @@
       initIcons();
     }
 
-    // QR SCANNING LOGIC with Anti-Repeat Lock
-    function onScanSuccess(decodedText) {
+    function toggleAutoStop() {
+      autoStopOnScan = !autoStopOnScan;
+      const btn = document.getElementById('autoStopToggleBtn');
+      const label = document.getElementById('autoStopLabel');
+      if (autoStopOnScan) {
+        btn.className = 'px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer bg-pink-500/20 text-pink-300 border-pink-500/40';
+        label.innerText = '⚡ Scan & Band: ON';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer bg-slate-800 text-slate-400 border-slate-700';
+        label.innerText = 'Continuous Mode';
+      }
+    }
+
+    // QR SCANNING LOGIC with Anti-Repeat Lock & Instant Stop
+    async function onScanSuccess(decodedText) {
       if (isScanningLocked) return;
 
       // Prevent re-scanning same QR code while held in camera frame
@@ -821,6 +844,17 @@
       lastScannedText = decodedText;
       lastScannedTime = Date.now();
       isScanningCooldown = true;
+
+      // Instant stop camera as requested ("camera qr dekhte hi scan and band")
+      if (autoStopOnScan) {
+        await stopScanner();
+      } else {
+        try {
+          if (html5QrScanner && typeof html5QrScanner.pause === 'function') {
+            html5QrScanner.pause(true);
+          }
+        } catch (e) {}
+      }
 
       const banner = document.getElementById('scanResultBanner');
       const title = document.getElementById('bannerTitle');
@@ -883,27 +917,22 @@
       cooldownEl.classList.remove('hidden');
       initIcons();
 
-      // Pause scanner video decoding if supported
-      try {
-        if (html5QrScanner && typeof html5QrScanner.pause === 'function') {
-          html5QrScanner.pause(true);
-        }
-      } catch (e) {}
-
-      // Cooldown 2.5 seconds
-      if (cooldownTimer) clearTimeout(cooldownTimer);
-      cooldownTimer = setTimeout(() => {
-        try {
-          if (html5QrScanner && typeof html5QrScanner.resume === 'function') {
-            html5QrScanner.resume();
-          }
-        } catch (e) {}
-        isScanningLocked = false;
-        isScanningCooldown = false;
-      }, 2500);
+      if (!autoStopOnScan) {
+        // Cooldown 2.5 seconds in continuous mode
+        if (cooldownTimer) clearTimeout(cooldownTimer);
+        cooldownTimer = setTimeout(() => {
+          try {
+            if (html5QrScanner && typeof html5QrScanner.resume === 'function') {
+              html5QrScanner.resume();
+            }
+          } catch (e) {}
+          isScanningLocked = false;
+          isScanningCooldown = false;
+        }, 2500);
+      }
     }
 
-    function dismissBanner() {
+    async function dismissBanner() {
       if (cooldownTimer) clearTimeout(cooldownTimer);
       try {
         if (html5QrScanner && typeof html5QrScanner.resume === 'function') {
@@ -915,21 +944,42 @@
       lastScannedText = null;
       lastScannedTime = 0;
       document.getElementById('scanResultBanner').classList.add('hidden');
+      if (autoStopOnScan && !isCameraActive) {
+        await startScanner();
+      }
     }
 
-    // Camera control
+    // Camera control - Rapid minus-second recognition
     async function startScanner() {
       const errBox = document.getElementById('cameraErrorBox');
       errBox.classList.add('hidden');
 
       try {
         if (!html5QrScanner) {
-          html5QrScanner = new Html5Qrcode('reader');
+          html5QrScanner = new Html5Qrcode('reader', {
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true
+            },
+            verbose: false
+          });
+        } else if (html5QrScanner.isScanning) {
+          return;
         }
 
         await html5QrScanner.start(
           { facingMode: cameraFacing },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
+          {
+            fps: 25,
+            qrbox: function(w, h) {
+              const minEdge = Math.min(w, h);
+              const edge = Math.max(160, Math.floor(minEdge * 0.88));
+              return { width: edge, height: edge };
+            },
+            aspectRatio: 1.0,
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true
+            }
+          },
           onScanSuccess,
           () => {}
         );
@@ -950,9 +1000,11 @@
     }
 
     async function stopScanner() {
-      if (html5QrScanner && isCameraActive) {
+      if (html5QrScanner) {
         try {
-          await html5QrScanner.stop();
+          if (html5QrScanner.isScanning) {
+            await html5QrScanner.stop();
+          }
           html5QrScanner.clear();
         } catch (e) {}
       }

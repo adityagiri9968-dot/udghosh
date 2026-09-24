@@ -28,7 +28,8 @@ import {
   UserCheck,
   Search,
   KeyRound,
-  BarChart3
+  BarChart3,
+  Zap
 } from 'lucide-react';
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
 
@@ -85,6 +86,7 @@ export default function App() {
 
   // Scanner state
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [autoStopOnScan, setAutoStopOnScan] = useState<boolean>(true);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [scanBanner, setScanBanner] = useState<ScanBannerState | null>(null);
   const [isCooldown, setIsCooldown] = useState<boolean>(false);
@@ -101,6 +103,16 @@ export default function App() {
   const lastScannedTimeRef = useRef<number>(0);
   const entriesRef = useRef<EntryRecord[]>(entries);
   const handleQrCodeSuccessRef = useRef<(text: string) => void>(() => {});
+  const isCameraActiveRef = useRef<boolean>(false);
+  const autoStopOnScanRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    autoStopOnScanRef.current = autoStopOnScan;
+  }, [autoStopOnScan]);
+
+  useEffect(() => {
+    isCameraActiveRef.current = isCameraActive;
+  }, [isCameraActive]);
 
   useEffect(() => {
     entriesRef.current = entries;
@@ -374,8 +386,8 @@ export default function App() {
     setScanBanner(null);
   };
 
-  // QR Scanning Logic with Anti-Repeat Lock
-  const handleNextScan = () => {
+  // QR Scanning Logic with Anti-Repeat Lock & Instant Stop
+  const handleNextScan = async () => {
     if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
     try {
       if (html5QrCodeRef.current && (html5QrCodeRef.current as any).resume) {
@@ -387,9 +399,14 @@ export default function App() {
     lastScannedCodeRef.current = null;
     lastScannedTimeRef.current = 0;
     setScanBanner(null);
+
+    // If camera was stopped, start camera for next student pass
+    if (!isCameraActiveRef.current && autoStopOnScanRef.current) {
+      await startCamera();
+    }
   };
 
-  const handleQrCodeSuccess = (decodedText: string) => {
+  const handleQrCodeSuccess = async (decodedText: string) => {
     // 1. If scanner is currently in locked cooldown, drop incoming frame
     if (isScanningLockedRef.current) return;
 
@@ -406,6 +423,18 @@ export default function App() {
     lastScannedCodeRef.current = decodedText;
     lastScannedTimeRef.current = Date.now();
     setIsCooldown(true);
+
+    // USER REQUIREMENT: "ekdam minus second camera qr dekhte hi scan and band"
+    // Turn off camera right away so it stops immediately without continuous looping
+    if (autoStopOnScanRef.current) {
+      await stopCamera();
+    } else {
+      try {
+        if (html5QrCodeRef.current && (html5QrCodeRef.current as any).pause) {
+          (html5QrCodeRef.current as any).pause(true);
+        }
+      } catch {}
+    }
 
     try {
       const data = JSON.parse(decodedText);
@@ -477,41 +506,48 @@ export default function App() {
       });
     }
 
-    // Attempt to pause video stream decoding while displaying banner
-    try {
-      if (html5QrCodeRef.current && (html5QrCodeRef.current as any).pause) {
-        (html5QrCodeRef.current as any).pause(true);
-      }
-    } catch {}
-
-    // Cooldown 2.5 seconds before unlocking for the next person
-    if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
-    cooldownTimerRef.current = setTimeout(() => {
-      try {
-        if (html5QrCodeRef.current && (html5QrCodeRef.current as any).resume) {
-          (html5QrCodeRef.current as any).resume();
-        }
-      } catch {}
-      isScanningLockedRef.current = false;
-      setIsCooldown(false);
-    }, 2500);
+    if (!autoStopOnScanRef.current) {
+      // Cooldown 2.5 seconds before unlocking for the next person in continuous mode
+      if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
+      cooldownTimerRef.current = setTimeout(() => {
+        try {
+          if (html5QrCodeRef.current && (html5QrCodeRef.current as any).resume) {
+            (html5QrCodeRef.current as any).resume();
+          }
+        } catch {}
+        isScanningLockedRef.current = false;
+        setIsCooldown(false);
+      }, 2500);
+    }
   };
 
   useEffect(() => {
     handleQrCodeSuccessRef.current = handleQrCodeSuccess;
   });
 
-  // Camera Controls
+  // Camera Controls - Ultra-fast minus second detection
   const startCamera = async () => {
     setCameraError('');
     try {
       if (!html5QrCodeRef.current) {
-        html5QrCodeRef.current = new Html5Qrcode(scannerContainerId);
+        html5QrCodeRef.current = new Html5Qrcode(scannerContainerId, {
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true
+          },
+          verbose: false
+        });
+      } else if (html5QrCodeRef.current.isScanning) {
+        return;
       }
 
+      // 25 FPS for sub-second rapid detection + responsive scanning area
       const config: Html5QrcodeCameraScanConfig = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
+        fps: 25,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+          const edge = Math.max(160, Math.floor(minEdge * 0.88));
+          return { width: edge, height: edge };
+        },
         aspectRatio: 1.0
       };
 
@@ -524,6 +560,7 @@ export default function App() {
         }
       );
 
+      isCameraActiveRef.current = true;
       setIsCameraActive(true);
     } catch (err: unknown) {
       console.error('Camera error', err);
@@ -533,19 +570,23 @@ export default function App() {
       } else {
         setCameraError('Camera start nahi ho saka. Device me camera verify karein ya image scan use karein.');
       }
+      isCameraActiveRef.current = false;
       setIsCameraActive(false);
     }
   };
 
   const stopCamera = async () => {
-    if (html5QrCodeRef.current && isCameraActive) {
+    if (html5QrCodeRef.current) {
       try {
-        await html5QrCodeRef.current.stop();
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
         html5QrCodeRef.current.clear();
       } catch (e) {
         console.error('Stop camera failed', e);
       }
     }
+    isCameraActiveRef.current = false;
     setIsCameraActive(false);
   };
 
@@ -1025,7 +1066,12 @@ export default function App() {
 
                     <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-[11px] text-slate-200">
-                        {isCooldown ? (
+                        {autoStopOnScan ? (
+                          <span className="text-pink-300 font-semibold flex items-center gap-1.5">
+                            <Zap className="w-3.5 h-3.5 text-pink-400" />
+                            <span>⚡ Scan complete! Camera turant band ho gaya hai.</span>
+                          </span>
+                        ) : isCooldown ? (
                           <>
                             <RefreshCw className="w-3.5 h-3.5 animate-spin text-pink-400" />
                             <span>Scan safalta-purvak ho gaya! Agle pass ke liye taiyaar...</span>
@@ -1039,8 +1085,9 @@ export default function App() {
 
                       <button
                         onClick={handleNextScan}
-                        className="px-3.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
+                        className="px-4 py-2 rounded-xl gradient-party text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
                       >
+                        <Camera className="w-3.5 h-3.5" />
                         <span>Agla Pass Scan Karein</span>
                         <span>➔</span>
                       </button>
@@ -1062,6 +1109,20 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {/* Scan & Band Mode Toggle */}
+                      <button
+                        onClick={() => setAutoStopOnScan(!autoStopOnScan)}
+                        title={autoStopOnScan ? 'Scan & Band Mode Active (QR dekhte hi scan aur camera band)' : 'Continuous Mode'}
+                        className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer ${
+                          autoStopOnScan
+                            ? 'bg-pink-500/20 text-pink-300 border-pink-500/40 shadow-sm'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        <Zap className="w-3.5 h-3.5 text-pink-400" />
+                        <span className="font-semibold">{autoStopOnScan ? '⚡ Scan & Band: ON' : 'Continuous Mode'}</span>
+                      </button>
+
                       {/* Audio beep mute/unmute */}
                       <button
                         onClick={() => setSoundEnabled(!soundEnabled)}
@@ -1114,21 +1175,76 @@ export default function App() {
 
                     {/* Placeholder when camera is inactive */}
                     {!isCameraActive && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/90 z-10">
-                        <div className="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-3">
-                          <CameraOff className="w-8 h-8" />
-                        </div>
-                        <h4 className="text-base font-bold text-white mb-1">Camera Abhi Off Hai</h4>
-                        <p className="text-xs text-slate-400 max-w-sm mb-4">
-                          Student ka QR ticket scan karne ke liye camera start karein.
-                        </p>
-                        <button
-                          onClick={startCamera}
-                          className="py-3 px-6 rounded-xl font-bold text-white gradient-party shadow-lg shadow-pink-500/25 hover:shadow-pink-500/40 active:scale-95 transition cursor-pointer flex items-center gap-2 text-sm"
-                        >
-                          <Camera className="w-4 h-4" />
-                          <span>Start Camera</span>
-                        </button>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/95 z-10 animate-in fade-in duration-200">
+                        {scanBanner ? (
+                          <div className="max-w-md w-full flex flex-col items-center">
+                            <div
+                              className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-3 shadow-lg ${
+                                scanBanner.type === 'duplicate'
+                                  ? 'bg-red-500/20 text-red-400 border border-red-500/40 shadow-red-950/50'
+                                  : scanBanner.type === 'success'
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-emerald-950/50'
+                                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-amber-950/50'
+                              }`}
+                            >
+                              {scanBanner.type === 'duplicate' ? (
+                                <AlertTriangle className="w-9 h-9 animate-bounce" />
+                              ) : scanBanner.type === 'success' ? (
+                                <CheckCircle2 className="w-9 h-9" />
+                              ) : (
+                                <XCircle className="w-9 h-9" />
+                              )}
+                            </div>
+
+                            <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30 mb-2">
+                              <Zap className="w-3 h-3 text-pink-400" />
+                              <span>⚡ Instant Scan Done • Camera Band</span>
+                            </div>
+
+                            <h4 className="text-lg sm:text-xl font-extrabold text-white mb-1">
+                              {scanBanner.type === 'success'
+                                ? scanBanner.details
+                                  ? `${scanBanner.details.name}`
+                                  : 'Entry Confirmed!'
+                                : scanBanner.type === 'duplicate'
+                                ? '⚠️ Pehle hi entry ho chuki hai!'
+                                : '❌ Invalid QR Code'}
+                            </h4>
+
+                            {scanBanner.details && (
+                              <div className="text-xs text-slate-300 font-mono mb-4 bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-800 flex items-center gap-3">
+                                <span>Roll: <strong className="text-pink-300">{scanBanner.details.roll}</strong></span>
+                                <span className="text-slate-600">•</span>
+                                <span className="text-slate-400">Time: {scanBanner.details.time}</span>
+                              </div>
+                            )}
+
+                            <button
+                              onClick={handleNextScan}
+                              className="py-3 px-6 rounded-xl font-bold text-white gradient-party shadow-lg shadow-pink-500/30 hover:shadow-pink-500/50 active:scale-95 transition cursor-pointer flex items-center gap-2 text-sm sm:text-base"
+                            >
+                              <Camera className="w-5 h-5" />
+                              <span>📸 Agla QR Scan Karein (Camera On)</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-3">
+                              <CameraOff className="w-8 h-8" />
+                            </div>
+                            <h4 className="text-base font-bold text-white mb-1">Camera Abhi Off Hai</h4>
+                            <p className="text-xs text-slate-400 max-w-sm mb-4">
+                              Student ka QR ticket scan karne ke liye camera start karein. QR dekhte hi instant scan ho kar camera auto-band ho jayega.
+                            </p>
+                            <button
+                              onClick={startCamera}
+                              className="py-3 px-6 rounded-xl font-bold text-white gradient-party shadow-lg shadow-pink-500/25 hover:shadow-pink-500/40 active:scale-95 transition cursor-pointer flex items-center gap-2 text-sm"
+                            >
+                              <Camera className="w-4 h-4" />
+                              <span>Start Camera</span>
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
