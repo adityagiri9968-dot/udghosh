@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>BRAC HJMC - Udghosh | Fresher Party</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- QRCode.js CDN for client-side QR generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  
+  <!-- html5-qrcode CDN for camera scanning -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Canvas Confetti CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    body {
+      background-color: #0b0f19;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.78);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .gradient-party {
+      background: linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #f43f5e 100%);
+    }
+    @keyframes laser-sweep {
+      0% { top: 6%; opacity: 0.8; }
+      50% { top: 90%; opacity: 1; }
+      100% { top: 6%; opacity: 0.8; }
+    }
+    .scanner-laser {
+      animation: laser-sweep 2s ease-in-out infinite;
+    }
+    #reader {
+      border: none !important;
+      width: 100% !important;
+      background: transparent !important;
+    }
+    #reader video {
+      border-radius: 1rem !important;
+      object-fit: cover !important;
+      width: 100% !important;
+      max-height: 380px !important;
+    }
+    #reader__scan_region {
+      border-radius: 1rem !important;
+      overflow: hidden !important;
+    }
+    #reader__dashboard {
+      background: transparent !important;
+      color: #94a3b8 !important;
+    }
+    #reader__dashboard button {
+      background: #334155 !important;
+      color: #fff !important;
+      border-radius: 0.5rem !important;
+      border: 1px solid #475569 !important;
+      padding: 6px 12px !important;
+      font-size: 0.8rem !important;
+      margin: 4px !important;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-pink-500 selection:text-white">
+
+  <!-- TOP HEADER -->
+  <header class="relative overflow-hidden border-b border-purple-500/20 bg-slate-950/80 backdrop-blur-md">
+    <div class="absolute -top-24 left-1/2 -translate-x-1/2 w-[600px] h-60 bg-gradient-to-r from-purple-600/30 via-pink-600/30 to-rose-600/30 blur-3xl pointer-events-none rounded-full"></div>
+    <div class="max-w-4xl mx-auto px-4 py-6 sm:py-8 text-center relative z-10">
+      <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-semibold bg-purple-500/10 border border-purple-500/30 text-purple-300 mb-3 animate-pulse">
+        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-pink-400"></i>
+        <span>BRAC HJMC</span>
+      </div>
+      <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight">
+        <span class="bg-gradient-to-r from-purple-400 via-pink-400 to-rose-400 bg-clip-text text-transparent">
+          🎉 Udghosh
+        </span>
+      </h1>
+      <p class="text-xl sm:text-2xl font-bold tracking-wider uppercase text-pink-400 mt-1">
+        Fresher Party
+      </p>
+      <p id="headerSubtitle" class="mt-2 text-sm sm:text-base text-slate-400 max-w-md mx-auto">
+        Apna naam aur roll number daal kar register karo
+      </p>
+      
+      <!-- Admin active indicator -->
+      <div id="adminBadge" class="hidden mt-3 inline-flex items-center gap-3 bg-purple-950/50 border border-purple-500/40 px-3.5 py-1.5 rounded-full text-xs text-purple-200">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+        <span>Admin Logged In (Organizer Mode)</span>
+        <button onclick="logoutAdmin()" class="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-300 px-2 py-0.5 rounded transition cursor-pointer">
+          Logout
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN WRAPPER -->
+  <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-6 sm:py-10">
+
+    <!-- ============================================== -->
+    <!-- PUBLIC FLOW: STUDENT REGISTRATION             -->
+    <!-- ============================================== -->
+    <div id="registrationView" class="w-full max-w-lg mx-auto">
+      
+      <!-- Form Container -->
+      <div id="formContainer" class="glass-card rounded-2xl p-6 sm:p-8 shadow-2xl border border-purple-500/20">
+        <div class="flex items-center gap-3 mb-6 pb-4 border-b border-slate-800">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/25">
+            <i data-lucide="ticket" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-bold text-white">Student Registration</h2>
+            <p class="text-xs text-slate-400">Gate pass praapt karne ke liye details bharein</p>
+          </div>
+        </div>
+
+        <div id="formError" class="hidden mb-5 p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-red-200 text-xs sm:text-sm flex items-center gap-2">
+          <i data-lucide="alert-triangle" class="w-4 h-4 text-red-400 shrink-0"></i>
+          <span id="formErrorText"></span>
+        </div>
+
+        <form id="regForm" onsubmit="handleRegister(event)" class="space-y-5">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+              Full Name (Poora Naam)
+            </label>
+            <input
+              type="text"
+              id="studentName"
+              placeholder="e.g. Rahul Sharma"
+              class="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 text-sm"
+              required
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+              College Roll Number
+            </label>
+            <input
+              type="text"
+              id="rollNumber"
+              placeholder="e.g. 23BCA104 / 2024CS089"
+              class="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 text-sm uppercase"
+              required
+            />
+            <p class="mt-1.5 text-[11px] text-slate-400">
+              * Yeh roll number entry ke samay verify kiya jayega
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            class="w-full mt-3 py-3.5 px-6 rounded-xl font-bold text-white gradient-party shadow-lg shadow-pink-500/25 hover:shadow-pink-500/40 hover:brightness-110 active:scale-[0.99] transition cursor-pointer flex items-center justify-center gap-2 text-sm sm:text-base"
+          >
+            <i data-lucide="qr-code" class="w-5 h-5"></i>
+            <span>Register Karo / Generate QR</span>
+          </button>
+        </form>
+
+        <div class="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+          <span class="flex items-center gap-1">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400"></i> One QR per student
+          </span>
+          <span>Venue: Main College Auditorium</span>
+        </div>
+      </div>
+
+      <!-- Result Pass Card (Hidden initially) -->
+      <div id="passContainer" class="hidden glass-card rounded-2xl p-6 sm:p-8 shadow-2xl border border-purple-500/30 text-center relative overflow-hidden">
+        <div class="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-purple-500 via-pink-500 to-rose-500"></div>
+        
+        <div class="inline-flex p-3 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 mb-3">
+          <i data-lucide="check-circle-2" class="w-8 h-8"></i>
+        </div>
+
+        <h3 class="text-xl sm:text-2xl font-bold text-white mb-1">
+          Registration Safalta-purvak Ho Gaya!
+        </h3>
+        <p class="text-xs text-pink-300 font-medium mb-6">
+          BRAC HJMC • Udghosh Fresher Party • Official Entry Pass
+        </p>
+
+        <!-- Pass Ticket Box -->
+        <div class="bg-slate-900/90 rounded-2xl p-5 border border-slate-700/80 mb-6 text-left">
+          <div class="flex justify-between items-start mb-4 pb-3 border-b border-slate-800">
+            <div>
+              <span class="text-[11px] uppercase tracking-wider text-slate-400 block">Student Name</span>
+              <span id="passName" class="text-lg font-bold text-white"></span>
+            </div>
+            <div class="text-right">
+              <span class="text-[11px] uppercase tracking-wider text-slate-400 block">Roll Number</span>
+              <span id="passRoll" class="text-base font-bold text-pink-400"></span>
+            </div>
+          </div>
+
+          <!-- QR Code Display Div -->
+          <div class="bg-white p-4 rounded-xl shadow-inner flex flex-col items-center justify-center my-2">
+            <div id="qrcodeWrapper" class="w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center"></div>
+            <span id="passIdLabel" class="text-[10px] text-slate-500 font-mono mt-2 font-semibold"></span>
+          </div>
+
+          <!-- Mandatory Screenshot Instruction -->
+          <div class="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-2.5">
+            <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5"></i>
+            <div>
+              <span class="font-semibold block">Zaroori Soochana:</span>
+              Is QR code ka screenshot le lein, auditorium entry gate par yehi dikhana hoga.
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            onclick="downloadPassImage()"
+            class="py-3 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-pink-600 to-rose-600 hover:brightness-110 active:scale-[0.98] transition cursor-pointer flex items-center justify-center gap-2 text-sm shadow-lg shadow-pink-600/30"
+          >
+            <i data-lucide="download" class="w-4 h-4"></i>
+            <span>Download QR / Save Image</span>
+          </button>
+
+          <button
+            onclick="resetRegistrationForm()"
+            class="py-3 px-4 rounded-xl font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 active:scale-[0.98] transition cursor-pointer flex items-center justify-center gap-2 text-sm"
+          >
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            <span>Naya Registration</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============================================== -->
+    <!-- ORGANIZER FLOW: ADMIN PANEL                   -->
+    <!-- ============================================== -->
+    <div id="adminView" class="hidden w-full space-y-6">
+      
+      <!-- Live Counter & Tab Switcher -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="glass-card rounded-2xl p-5 border border-purple-500/30 flex items-center justify-between sm:col-span-1 shadow-lg">
+          <div>
+            <span class="text-xs uppercase tracking-wider text-slate-400 block font-medium">Total Entry</span>
+            <div class="flex items-baseline gap-2 mt-1">
+              <span id="totalEntryCount" class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">0</span>
+              <span class="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block"></span> Live
+              </span>
+            </div>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300">
+            <i data-lucide="user-check" class="w-6 h-6"></i>
+          </div>
+        </div>
+
+        <div class="glass-card rounded-2xl p-2 border border-slate-800 flex items-center justify-center sm:col-span-2 gap-2">
+          <button
+            id="tabScannerBtn"
+            onclick="switchAdminTab('scanner')"
+            class="flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md"
+          >
+            <i data-lucide="camera" class="w-4 h-4"></i>
+            <span>Scanner Tab</span>
+          </button>
+
+          <button
+            id="tabEntriesBtn"
+            onclick="switchAdminTab('entries')"
+            class="flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+          >
+            <i data-lucide="users" class="w-4 h-4"></i>
+            <span id="entryListTabLabel">Entry List Tab (0)</span>
+          </button>
+
+          <button
+            onclick="logoutAdmin()"
+            title="Admin Logout"
+            class="p-3 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+          >
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- SCANNER TAB SECTION -->
+      <div id="scannerSection" class="space-y-5">
+        <!-- Scan feedback banner -->
+        <div id="scanResultBanner" class="hidden p-4 sm:p-5 rounded-2xl border transition-all duration-300">
+          <div class="flex items-start gap-3.5">
+            <div id="bannerIconContainer"></div>
+            <div class="flex-1">
+              <h4 id="bannerTitle" class="text-base sm:text-lg font-extrabold leading-snug"></h4>
+              <p id="bannerSub" class="text-sm font-medium opacity-90 mt-0.5"></p>
+            </div>
+            <button onclick="dismissBanner()" class="text-slate-400 hover:text-white p-1">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <div id="cooldownNotice" class="hidden mt-3 flex items-center gap-2 text-[11px] text-slate-300">
+            <i data-lucide="refresh-cw" class="w-3 h-3 animate-spin text-pink-400"></i>
+            <span>Resuming scanner in 2.5 seconds...</span>
+          </div>
+        </div>
+
+        <!-- Camera Card -->
+        <div class="glass-card rounded-2xl p-4 sm:p-6 border border-purple-500/20 shadow-2xl relative">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div class="flex items-center gap-2">
+              <i data-lucide="camera" class="w-5 h-5 text-pink-400"></i>
+              <h3 class="font-bold text-white text-base sm:text-lg">Live QR Code Scanner</h3>
+              <span id="activeStatusPill" class="hidden px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                Active
+              </span>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button
+                onclick="toggleSound()"
+                id="soundToggleBtn"
+                class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <i data-lucide="volume-2" class="w-4 h-4 text-emerald-400"></i>
+                <span id="soundLabel">Beep On</span>
+              </button>
+
+              <button
+                onclick="switchCamera()"
+                id="flipCameraBtn"
+                class="hidden p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <i data-lucide="flip-horizontal" class="w-4 h-4 text-purple-400"></i>
+                <span>Flip Camera</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="cameraErrorBox" class="hidden mb-4 p-3 rounded-xl bg-amber-950/60 border border-amber-500/40 text-amber-200 text-xs sm:text-sm"></div>
+
+          <!-- Camera Viewfinder -->
+          <div class="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 min-h-[300px] sm:min-h-[360px] flex items-center justify-center">
+            <div id="reader" class="w-full h-full"></div>
+            
+            <!-- Laser overlay -->
+            <div id="laserOverlay" class="hidden absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div class="relative w-64 h-64 border-2 border-dashed border-pink-500/60 rounded-2xl">
+                <div class="absolute w-full h-0.5 bg-gradient-to-r from-transparent via-pink-400 to-transparent shadow-[0_0_8px_#ec4899] scanner-laser"></div>
+                <div class="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-pink-400"></div>
+                <div class="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-pink-400"></div>
+                <div class="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-pink-400"></div>
+                <div class="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-pink-400"></div>
+              </div>
+            </div>
+
+            <!-- Inactive Placeholder -->
+            <div id="cameraPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/90 z-10">
+              <div class="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-3">
+                <i data-lucide="camera-off" class="w-8 h-8"></i>
+              </div>
+              <h4 class="text-base font-bold text-white mb-1">Camera Abhi Off Hai</h4>
+              <p class="text-xs text-slate-400 max-w-sm mb-4">
+                Student ka QR ticket scan karne ke liye camera start karein.
+              </p>
+              <button
+                onclick="startScanner()"
+                class="py-3 px-6 rounded-xl font-bold text-white gradient-party shadow-lg shadow-pink-500/25 hover:shadow-pink-500/40 active:scale-95 transition cursor-pointer flex items-center gap-2 text-sm"
+              >
+                <i data-lucide="camera" class="w-4 h-4"></i>
+                <span>Start Camera</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
+            <div id="camControlButtons">
+              <button
+                onclick="startScanner()"
+                id="startCamBtn"
+                class="py-2.5 px-4 rounded-xl text-xs font-bold text-white gradient-party hover:brightness-110 transition cursor-pointer flex items-center gap-1.5"
+              >
+                <i data-lucide="camera" class="w-4 h-4"></i>
+                <span>Start Camera</span>
+              </button>
+              <button
+                onclick="stopScanner()"
+                id="stopCamBtn"
+                class="hidden py-2.5 px-4 rounded-xl text-xs font-bold text-red-300 bg-red-950/50 hover:bg-red-900/60 border border-red-500/30 transition cursor-pointer flex items-center gap-1.5"
+              >
+                <i data-lucide="camera-off" class="w-4 h-4"></i>
+                <span>Stop Camera</span>
+              </button>
+            </div>
+
+            <label class="py-2.5 px-3.5 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer flex items-center gap-1.5">
+              <i data-lucide="qr-code" class="w-4 h-4 text-pink-400"></i>
+              <span>Scan Image / Screenshot</span>
+              <input type="file" accept="image/*" onchange="handleImageFileScan(event)" class="hidden" />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- ENTRY LIST TAB SECTION -->
+      <div id="entriesSection" class="hidden glass-card rounded-2xl p-5 sm:p-6 border border-purple-500/20 shadow-2xl space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div>
+            <h3 class="text-lg font-bold text-white flex items-center gap-2">
+              <i data-lucide="users" class="w-5 h-5 text-pink-400"></i>
+              <span>Admitted Students List</span>
+            </h3>
+            <p id="entrySubCount" class="text-xs text-slate-400">Kul 0 vidyarthiyon ki entry confirm ho chuki hai</p>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              onclick="exportCSV()"
+              class="py-2 px-3.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition cursor-pointer flex items-center gap-1.5 shadow"
+            >
+              <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+              <span>Export to CSV / Excel</span>
+            </button>
+
+            <button
+              onclick="promptClearData()"
+              class="py-2 px-3 rounded-xl text-xs font-bold text-red-300 bg-red-950/60 hover:bg-red-900 border border-red-500/30 transition cursor-pointer flex items-center gap-1.5"
+            >
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+              <span>Clear All Data</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="tableContainer" class="overflow-x-auto rounded-xl border border-slate-800">
+          <!-- Dynamically populated table or empty state -->
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-slate-800/80 bg-slate-950/80 py-4 px-4 text-center text-xs text-slate-400 relative z-10">
+    <p>BRAC HJMC • Udghosh Fresher Party • Live QR Entry Verification System</p>
+  </footer>
+
+  <!-- FLOATING ADMIN GEAR BUTTON -->
+  <div class="fixed bottom-5 right-5 z-40">
+    <button
+      onclick="openPinModal()"
+      title="Admin Access (Organizer Gate Entry)"
+      class="w-12 h-12 rounded-full bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 shadow-xl shadow-black/50 flex items-center justify-center transition active:scale-95 cursor-pointer group"
+    >
+      <i data-lucide="settings" class="w-6 h-6 group-hover:rotate-45 transition-transform duration-300"></i>
+    </button>
+  </div>
+
+  <!-- ADMIN PIN MODAL (PIN: 7271) -->
+  <div id="pinModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+    <div class="glass-card w-full max-w-sm rounded-2xl p-6 border border-purple-500/30 shadow-2xl relative">
+      <button onclick="closePinModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white p-1">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <div class="text-center mb-5">
+        <div class="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/40 text-purple-300 flex items-center justify-center mx-auto mb-3">
+          <i data-lucide="key-round" class="w-6 h-6"></i>
+        </div>
+        <h3 class="text-lg font-bold text-white">Admin Access Pin Daalein</h3>
+        <p class="text-xs text-slate-400 mt-1">Organizer gate entry scanner access karein</p>
+      </div>
+
+      <div id="pinErrorBox" class="hidden mb-4 p-2.5 rounded-xl bg-red-950/70 border border-red-500/50 text-red-300 text-xs text-center font-bold">
+        ⚠️ Galat Pin!
+      </div>
+
+      <form onsubmit="handlePinSubmit(event)" class="space-y-4">
+        <div>
+          <input
+            type="password"
+            id="pinInputField"
+            maxlength="6"
+            placeholder="Secret PIN"
+            class="w-full text-center tracking-widest text-2xl font-mono bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            required
+          />
+          <span class="block text-[11px] text-slate-500 text-center mt-1.5">Keval Adhikrit Organizers ke liye</span>
+        </div>
+
+        <div class="flex gap-2">
+          <button
+            type="button"
+            onclick="closePinModal()"
+            class="flex-1 py-2.5 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-750 transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="flex-1 py-2.5 rounded-xl text-xs font-bold text-white gradient-party shadow-md hover:brightness-110 transition"
+          >
+            Login
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT LOGIC -->
+  <script>
+    // State variables
+    let currentPassData = null;
+    let entries = [];
+    let html5QrScanner = null;
+    let isCameraActive = false;
+    let cameraFacing = 'environment';
+    let isScanningCooldown = false;
+    let soundEnabled = true;
+
+    // Load persisted entries
+    try {
+      const saved = localStorage.getItem('fresher_party_entries');
+      if (saved) entries = JSON.parse(saved);
+    } catch (e) {
+      entries = [];
+    }
+
+    // Audio Synthesis Web Audio API
+    function playBeep(type) {
+      if (!soundEnabled) return;
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        if (type === 'success') {
+          // Melodic ascending chord C5 - E5 - G5
+          [523.25, 659.25, 783.99].forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+            gain.gain.setValueAtTime(0.3, now + idx * 0.08);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.22);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now + idx * 0.08);
+            osc.stop(now + idx * 0.08 + 0.22);
+          });
+        } else {
+          // Warning dual buzzer
+          [0, 0.2].forEach((offset) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(220, now + offset);
+            osc.frequency.setValueAtTime(160, now + offset + 0.07);
+            gain.gain.setValueAtTime(0.4, now + offset);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.16);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now + offset);
+            osc.stop(now + offset + 0.16);
+          });
+        }
+      } catch (err) {
+        console.warn('Audio error', err);
+      }
+    }
+
+    function triggerVibe(pattern) {
+      if ('vibrate' in navigator) {
+        try { navigator.vibrate(pattern); } catch (e) {}
+      }
+    }
+
+    // Initialize Lucide icons
+    function initIcons() {
+      if (window.lucide) {
+        lucide.createIcons();
+      }
+    }
+
+    // PUBLIC FLOW: Student Registration
+    function handleRegister(e) {
+      e.preventDefault();
+      const name = document.getElementById('studentName').value.trim();
+      const roll = document.getElementById('rollNumber').value.trim().toUpperCase();
+      const errBox = document.getElementById('formError');
+
+      if (!name || !roll) {
+        document.getElementById('formErrorText').innerText = 'Kripya naam aur roll number dono bharein.';
+        errBox.classList.remove('hidden');
+        return;
+      }
+      errBox.classList.add('hidden');
+
+      const uniqueId = 'FP-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(Math.random() * 899 + 100);
+      const payload = {
+        name: name,
+        roll: roll,
+        id: uniqueId
+      };
+
+      currentPassData = payload;
+
+      // Render details in pass modal
+      document.getElementById('passName').innerText = name;
+      document.getElementById('passRoll').innerText = roll;
+      document.getElementById('passIdLabel').innerText = 'PASS ID: ' + uniqueId;
+
+      // Generate QR Code using qrcode.js
+      const qrWrapper = document.getElementById('qrcodeWrapper');
+      qrWrapper.innerHTML = '';
+      new QRCode(qrWrapper, {
+        text: JSON.stringify(payload),
+        width: 220,
+        height: 220,
+        colorDark: '#0f172a',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+
+      // Switch views
+      document.getElementById('formContainer').classList.add('hidden');
+      document.getElementById('passContainer').classList.remove('hidden');
+
+      if (window.confetti) {
+        confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
+      }
+      initIcons();
+    }
+
+    function resetRegistrationForm() {
+      document.getElementById('regForm').reset();
+      document.getElementById('formContainer').classList.remove('hidden');
+      document.getElementById('passContainer').classList.add('hidden');
+      currentPassData = null;
+      initIcons();
+    }
+
+    // Download pass ticket image
+    function downloadPassImage() {
+      if (!currentPassData) return;
+      const qrCanvas = document.querySelector('#qrcodeWrapper canvas');
+      if (!qrCanvas) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 700;
+      canvas.height = 980;
+      const ctx = canvas.getContext('2d');
+
+      // Gradient background
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, 980);
+      bgGrad.addColorStop(0, '#0f172a');
+      bgGrad.addColorStop(1, '#090d16');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, 700, 980);
+
+      // Header Banner
+      const banner = ctx.createLinearGradient(0, 0, 700, 0);
+      banner.addColorStop(0, '#9333ea');
+      banner.addColorStop(0.5, '#ec4899');
+      banner.addColorStop(1, '#f43f5e');
+      ctx.fillStyle = banner;
+      ctx.fillRect(0, 0, 700, 140);
+
+      ctx.fillStyle = '#fce7f3';
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('BRAC HJMC', 350, 42);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 36px sans-serif';
+      ctx.fillText('🎉 UDGHOSH 🎉', 350, 80);
+
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillStyle = '#fce7f3';
+      ctx.fillText('FRESHER PARTY ENTRY PASS', 350, 116);
+
+      // Info Card
+      ctx.fillStyle = 'rgba(30, 41, 59, 0.7)';
+      ctx.fillRect(50, 180, 600, 140);
+      ctx.strokeStyle = '#475569';
+      ctx.strokeRect(50, 180, 600, 140);
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '16px sans-serif';
+      ctx.fillText('STUDENT NAME', 75, 215);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText(currentPassData.name, 75, 250);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '16px sans-serif';
+      ctx.fillText('ROLL NUMBER', 430, 215);
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 26px sans-serif';
+      ctx.fillText(currentPassData.roll, 430, 250);
+
+      // QR container
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.roundRect(185, 360, 330, 330, 16);
+      ctx.fill();
+      ctx.drawImage(qrCanvas, 205, 380, 290, 290);
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '600 18px sans-serif';
+      ctx.fillText('Entry Gate par ye QR Code dikhana anivarya hai', 350, 740);
+
+      const link = document.createElement('a');
+      link.download = `Udghosh_Fresher_Pass_${currentPassData.roll}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+
+    // ADMIN PIN ACCESS (PIN: 7271)
+    function openPinModal() {
+      if (sessionStorage.getItem('fresher_party_admin_logged_in') === 'true') {
+        showAdminView();
+      } else {
+        document.getElementById('pinInputField').value = '';
+        document.getElementById('pinErrorBox').classList.add('hidden');
+        document.getElementById('pinModal').classList.remove('hidden');
+        initIcons();
+      }
+    }
+
+    function closePinModal() {
+      document.getElementById('pinModal').classList.add('hidden');
+    }
+
+    function handlePinSubmit(e) {
+      e.preventDefault();
+      const pin = document.getElementById('pinInputField').value.trim();
+      if (pin === '7271') {
+        sessionStorage.setItem('fresher_party_admin_logged_in', 'true');
+        closePinModal();
+        showAdminView();
+      } else {
+        document.getElementById('pinErrorBox').classList.remove('hidden');
+      }
+    }
+
+    function showAdminView() {
+      document.getElementById('registrationView').classList.add('hidden');
+      document.getElementById('adminView').classList.remove('hidden');
+      document.getElementById('adminBadge').classList.remove('hidden');
+      document.getElementById('headerSubtitle').innerText = 'Organizer & Gate Entry Admin Panel';
+      updateEntriesUI();
+      switchAdminTab('scanner');
+      initIcons();
+    }
+
+    function logoutAdmin() {
+      stopScanner();
+      sessionStorage.removeItem('fresher_party_admin_logged_in');
+      document.getElementById('adminView').classList.add('hidden');
+      document.getElementById('adminBadge').classList.add('hidden');
+      document.getElementById('registrationView').classList.remove('hidden');
+      document.getElementById('headerSubtitle').innerText = 'Apna naam aur roll number daal kar register karo';
+      initIcons();
+    }
+
+    // ADMIN TABS
+    function switchAdminTab(tab) {
+      const scanBtn = document.getElementById('tabScannerBtn');
+      const entriesBtn = document.getElementById('tabEntriesBtn');
+      const scanSec = document.getElementById('scannerSection');
+      const entriesSec = document.getElementById('entriesSection');
+
+      if (tab === 'scanner') {
+        scanBtn.className = 'flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md';
+        entriesBtn.className = 'flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer text-slate-400 hover:text-slate-200 hover:bg-slate-800/50';
+        scanSec.classList.remove('hidden');
+        entriesSec.classList.add('hidden');
+      } else {
+        entriesBtn.className = 'flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md';
+        scanBtn.className = 'flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer text-slate-400 hover:text-slate-200 hover:bg-slate-800/50';
+        scanSec.classList.add('hidden');
+        entriesSec.classList.remove('hidden');
+        stopScanner();
+        renderEntriesTable();
+      }
+      initIcons();
+    }
+
+    // QR SCANNING LOGIC
+    function onScanSuccess(decodedText) {
+      if (isScanningCooldown) return;
+
+      const banner = document.getElementById('scanResultBanner');
+      const title = document.getElementById('bannerTitle');
+      const sub = document.getElementById('bannerSub');
+      const icon = document.getElementById('bannerIconContainer');
+      const cooldownEl = document.getElementById('cooldownNotice');
+
+      banner.className = 'p-4 sm:p-5 rounded-2xl border transition-all duration-300';
+
+      try {
+        const data = JSON.parse(decodedText);
+        if (!data || !data.name || !data.roll) throw new Error('Invalid format');
+
+        const cleanRoll = String(data.roll).trim().toUpperCase();
+        const studentName = String(data.name).trim();
+
+        // Check duplicate
+        const existing = entries.find(e => e.roll.trim().toUpperCase() === cleanRoll);
+
+        if (existing) {
+          // DUPLICATE
+          playBeep('duplicate');
+          triggerVibe([300, 100, 300]);
+          banner.classList.add('bg-red-950/80', 'border-red-500', 'text-red-100');
+          icon.innerHTML = '<i data-lucide="alert-triangle" class="w-7 h-7 text-red-400 shrink-0 mt-0.5 animate-bounce"></i>';
+          title.innerText = '⚠️ Pehle hi entry ho chuki hai!';
+          sub.innerText = `(Scanned at ${existing.scannedAt}) • ${existing.name} (${existing.roll})`;
+        } else {
+          // VALID & NEW ENTRY
+          const newRecord = {
+            id: data.id || 'FP-' + Date.now(),
+            name: studentName,
+            roll: cleanRoll,
+            scannedAt: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            timestamp: Date.now()
+          };
+
+          entries.unshift(newRecord);
+          localStorage.setItem('fresher_party_entries', JSON.stringify(entries));
+          updateEntriesUI();
+
+          playBeep('success');
+          triggerVibe([100, 50, 100]);
+          if (window.confetti) confetti({ particleCount: 40, spread: 50, origin: { y: 0.5 } });
+
+          banner.classList.add('bg-emerald-950/80', 'border-emerald-500', 'text-emerald-100');
+          icon.innerHTML = '<i data-lucide="check-circle-2" class="w-7 h-7 text-emerald-400 shrink-0 mt-0.5"></i>';
+          title.innerText = `✅ Entry Confirmed! Welcome, ${studentName} (${cleanRoll})`;
+          sub.innerText = `Scanned at ${newRecord.scannedAt}`;
+        }
+      } catch (e) {
+        playBeep('duplicate');
+        banner.classList.add('bg-amber-950/80', 'border-amber-500', 'text-amber-100');
+        icon.innerHTML = '<i data-lucide="x-circle" class="w-7 h-7 text-amber-400 shrink-0 mt-0.5"></i>';
+        title.innerText = '❌ Invalid QR code';
+        sub.innerText = 'Kripya official Fresher Party QR pass hi scan karein.';
+      }
+
+      banner.classList.remove('hidden');
+      cooldownEl.classList.remove('hidden');
+      initIcons();
+
+      // Cooldown 2.5 seconds
+      isScanningCooldown = true;
+      setTimeout(() => {
+        isScanningCooldown = false;
+        cooldownEl.classList.add('hidden');
+      }, 2500);
+    }
+
+    function dismissBanner() {
+      document.getElementById('scanResultBanner').classList.add('hidden');
+    }
+
+    // Camera control
+    async function startScanner() {
+      const errBox = document.getElementById('cameraErrorBox');
+      errBox.classList.add('hidden');
+
+      try {
+        if (!html5QrScanner) {
+          html5QrScanner = new Html5Qrcode('reader');
+        }
+
+        await html5QrScanner.start(
+          { facingMode: cameraFacing },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          onScanSuccess,
+          () => {}
+        );
+
+        isCameraActive = true;
+        document.getElementById('cameraPlaceholder').classList.add('hidden');
+        document.getElementById('laserOverlay').classList.remove('hidden');
+        document.getElementById('startCamBtn').classList.add('hidden');
+        document.getElementById('stopCamBtn').classList.remove('hidden');
+        document.getElementById('activeStatusPill').classList.remove('hidden');
+        document.getElementById('flipCameraBtn').classList.remove('hidden');
+        initIcons();
+      } catch (err) {
+        console.error(err);
+        errBox.innerText = 'Camera access karne me samasya: ' + (err.message || err);
+        errBox.classList.remove('hidden');
+      }
+    }
+
+    async function stopScanner() {
+      if (html5QrScanner && isCameraActive) {
+        try {
+          await html5QrScanner.stop();
+          html5QrScanner.clear();
+        } catch (e) {}
+      }
+      isCameraActive = false;
+      document.getElementById('cameraPlaceholder').classList.remove('hidden');
+      document.getElementById('laserOverlay').classList.add('hidden');
+      document.getElementById('startCamBtn').classList.remove('hidden');
+      document.getElementById('stopCamBtn').classList.add('hidden');
+      document.getElementById('activeStatusPill').classList.add('hidden');
+      document.getElementById('flipCameraBtn').classList.add('hidden');
+      initIcons();
+    }
+
+    async function switchCamera() {
+      cameraFacing = cameraFacing === 'environment' ? 'user' : 'environment';
+      if (isCameraActive) {
+        await stopScanner();
+        setTimeout(startScanner, 300);
+      }
+    }
+
+    async function handleImageFileScan(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        const scanner = html5QrScanner || new Html5Qrcode('reader');
+        html5QrScanner = scanner;
+        const result = await scanner.scanFile(file, true);
+        onScanSuccess(result);
+      } catch (err) {
+        alert('Is image me koi valid QR code nahi mila.');
+      }
+      e.target.value = '';
+    }
+
+    function toggleSound() {
+      soundEnabled = !soundEnabled;
+      document.getElementById('soundLabel').innerText = soundEnabled ? 'Beep On' : 'Beep Off';
+      initIcons();
+    }
+
+    function updateEntriesUI() {
+      document.getElementById('totalEntryCount').innerText = entries.length;
+      document.getElementById('entryListTabLabel').innerText = `Entry List Tab (${entries.length})`;
+      document.getElementById('entrySubCount').innerText = `Kul ${entries.length} vidyarthiyon ki entry confirm ho chuki hai`;
+      renderEntriesTable();
+    }
+
+    function renderEntriesTable() {
+      const container = document.getElementById('tableContainer');
+      if (entries.length === 0) {
+        container.innerHTML = `
+          <div class="py-12 text-center text-slate-400">
+            <p class="text-sm font-medium">Abhi tak koi entry scan nahi hui.</p>
+            <p class="text-xs text-slate-400 mt-1">Scanner tab par ja kar student passes scan karna shuru karein.</p>
+          </div>
+        `;
+        return;
+      }
+
+      let html = `
+        <table class="w-full text-left border-collapse text-xs sm:text-sm">
+          <thead>
+            <tr class="bg-slate-900/90 text-slate-400 border-b border-slate-800 uppercase text-[11px] tracking-wider">
+              <th class="py-3 px-4 w-12 text-center">S.No</th>
+              <th class="py-3 px-4">Student Name</th>
+              <th class="py-3 px-4">Roll Number</th>
+              <th class="py-3 px-4">Entry Time</th>
+              <th class="py-3 px-4 text-right">Pass ID</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-800/60 font-medium">
+      `;
+
+      entries.forEach((e, i) => {
+        html += `
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="py-3 px-4 text-center text-slate-400 font-mono text-xs">${i + 1}</td>
+            <td class="py-3 px-4 font-semibold text-white">${e.name}</td>
+            <td class="py-3 px-4">
+              <span class="px-2 py-0.5 rounded bg-pink-500/10 text-pink-400 font-mono font-bold text-xs border border-pink-500/20">${e.roll}</span>
+            </td>
+            <td class="py-3 px-4 text-slate-300">${e.scannedAt}</td>
+            <td class="py-3 px-4 text-right font-mono text-[11px] text-slate-400">${e.id}</td>
+          </tr>
+        `;
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function exportCSV() {
+      if (entries.length === 0) {
+        alert('Abhi tak koi entry scan nahi hui.');
+        return;
+      }
+      const headers = ['S.No', 'Student Name', 'Roll Number', 'Entry Time', 'Pass ID'];
+      const rows = entries.map((e, idx) => [
+        idx + 1,
+        `"${e.name}"`,
+        `"${e.roll}"`,
+        `"${e.scannedAt}"`,
+        `"${e.id}"`
+      ]);
+      const csv = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const link = document.createElement('a');
+      link.href = encodeURI(csv);
+      link.download = `BRAC_HJMC_Udghosh_Fresher_Party_Entries_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+    }
+
+    function promptClearData() {
+      if (confirm('Kya aap sach me saara entry data clear karna chahte hain?')) {
+        entries = [];
+        localStorage.removeItem('fresher_party_entries');
+        updateEntriesUI();
+        dismissBanner();
+      }
+    }
+
+    // Check if session was already active
+    if (sessionStorage.getItem('fresher_party_admin_logged_in') === 'true') {
+      showAdminView();
+    }
+
+    // Initial icon render
+    initIcons();
+  </script>
+</body>
+</html>
