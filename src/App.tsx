@@ -96,6 +96,15 @@ export default function App() {
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const scannerContainerId = 'qr-reader';
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isScanningLockedRef = useRef<boolean>(false);
+  const lastScannedCodeRef = useRef<string | null>(null);
+  const lastScannedTimeRef = useRef<number>(0);
+  const entriesRef = useRef<EntryRecord[]>(entries);
+  const handleQrCodeSuccessRef = useRef<(text: string) => void>(() => {});
+
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
 
   // Sync entries to localStorage
   useEffect(() => {
@@ -365,9 +374,38 @@ export default function App() {
     setScanBanner(null);
   };
 
-  // QR Scanning Logic
+  // QR Scanning Logic with Anti-Repeat Lock
+  const handleNextScan = () => {
+    if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
+    try {
+      if (html5QrCodeRef.current && (html5QrCodeRef.current as any).resume) {
+        (html5QrCodeRef.current as any).resume();
+      }
+    } catch {}
+    isScanningLockedRef.current = false;
+    setIsCooldown(false);
+    lastScannedCodeRef.current = null;
+    lastScannedTimeRef.current = 0;
+    setScanBanner(null);
+  };
+
   const handleQrCodeSuccess = (decodedText: string) => {
-    if (isCooldown) return;
+    // 1. If scanner is currently in locked cooldown, drop incoming frame
+    if (isScanningLockedRef.current) return;
+
+    // 2. Prevent repeating duplicate alerts if the same QR is still held in front of camera
+    if (
+      lastScannedCodeRef.current === decodedText &&
+      Date.now() - lastScannedTimeRef.current < 8000
+    ) {
+      return;
+    }
+
+    // Immediately lock to prevent concurrent frames from triggering
+    isScanningLockedRef.current = true;
+    lastScannedCodeRef.current = decodedText;
+    lastScannedTimeRef.current = Date.now();
+    setIsCooldown(true);
 
     try {
       const data = JSON.parse(decodedText);
@@ -378,24 +416,23 @@ export default function App() {
       const scannedRoll = String(data.roll).trim().toUpperCase();
       const studentNameScanned = String(data.name).trim();
 
-      // Check duplicate in entries
-      const existingIndex = entries.findIndex(
+      // Check duplicate using entriesRef to prevent stale closure
+      const existing = entriesRef.current.find(
         (item) => item.roll.trim().toUpperCase() === scannedRoll
       );
 
-      if (existingIndex !== -1) {
+      if (existing) {
         // DUPLICATE ENTRY
-        const prev = entries[existingIndex];
         playDuplicateWarningSound();
         triggerVibration([300, 100, 300]);
         setScanBanner({
           type: 'duplicate',
           message: '⚠️ Pehle hi entry ho chuki hai!',
-          subMessage: `(Scanned at ${prev.scannedAt})`,
+          subMessage: `(Scanned at ${existing.scannedAt})`,
           details: {
-            name: prev.name,
-            roll: prev.roll,
-            time: prev.scannedAt
+            name: existing.name,
+            roll: existing.roll,
+            time: existing.scannedAt
           }
         });
       } else {
@@ -420,6 +457,7 @@ export default function App() {
           origin: { y: 0.5 }
         });
 
+        entriesRef.current = [newRecord, ...entriesRef.current];
         setEntries((prev) => [newRecord, ...prev]);
         setScanBanner({
           type: 'success',
@@ -439,13 +477,29 @@ export default function App() {
       });
     }
 
-    // Cooldown 2.5 seconds
-    setIsCooldown(true);
+    // Attempt to pause video stream decoding while displaying banner
+    try {
+      if (html5QrCodeRef.current && (html5QrCodeRef.current as any).pause) {
+        (html5QrCodeRef.current as any).pause(true);
+      }
+    } catch {}
+
+    // Cooldown 2.5 seconds before unlocking for the next person
     if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
     cooldownTimerRef.current = setTimeout(() => {
+      try {
+        if (html5QrCodeRef.current && (html5QrCodeRef.current as any).resume) {
+          (html5QrCodeRef.current as any).resume();
+        }
+      } catch {}
+      isScanningLockedRef.current = false;
       setIsCooldown(false);
     }, 2500);
   };
+
+  useEffect(() => {
+    handleQrCodeSuccessRef.current = handleQrCodeSuccess;
+  });
 
   // Camera Controls
   const startCamera = async () => {
@@ -464,7 +518,7 @@ export default function App() {
       await html5QrCodeRef.current.start(
         { facingMode: facingMode },
         config,
-        (decodedText) => handleQrCodeSuccess(decodedText),
+        (decodedText) => handleQrCodeSuccessRef.current(decodedText),
         () => {
           // ignore scan frame errors
         }
@@ -961,19 +1015,36 @@ export default function App() {
                       </div>
 
                       <button
-                        onClick={() => setScanBanner(null)}
+                        onClick={handleNextScan}
                         className="text-slate-400 hover:text-white p-1 rounded-lg"
+                        title="Dismiss & Ready Next Scan"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
 
-                    {isCooldown && (
-                      <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-300">
-                        <RefreshCw className="w-3 h-3 animate-spin text-pink-400" />
-                        <span>Resuming scanner in 2.5 seconds...</span>
+                    <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-[11px] text-slate-200">
+                        {isCooldown ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-pink-400" />
+                            <span>Scan safalta-purvak ho gaya! Agle pass ke liye taiyaar...</span>
+                          </>
+                        ) : (
+                          <span className="text-emerald-300 font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Ready to scan next pass
+                          </span>
+                        )}
                       </div>
-                    )}
+
+                      <button
+                        onClick={handleNextScan}
+                        className="px-3.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
+                      >
+                        <span>Agla Pass Scan Karein</span>
+                        <span>➔</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
