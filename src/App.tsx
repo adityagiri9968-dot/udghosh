@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import { Html5Qrcode, Html5QrcodeCameraScanConfig } from 'html5-qrcode';
+import jsQR from 'jsqr';
 import confetti from 'canvas-confetti';
 import {
   PartyPopper,
@@ -31,7 +32,8 @@ import {
   BarChart3,
   Zap,
   Bot,
-  Cpu
+  Cpu,
+  Aperture
 } from 'lucide-react';
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
 
@@ -99,8 +101,14 @@ export default function App() {
 
   // 🤖 AI Automatic Bot (Single-Scan Auto-Guard) State
   const [aiBotMode, setAiBotMode] = useState<'single_shot' | 'smart_guard'>('single_shot');
-  const [aiBotStatus, setAiBotStatus] = useState<string>('🟢 AI Bot: Active • Ready for Student Pass');
-  const [aiBotLastAction, setAiBotLastAction] = useState<string>('Bot standby - 1 scan only');
+  const [aiBotStatus, setAiBotStatus] = useState<string>('📸 AI Bot: Ready • Point camera at QR & Click to Scan');
+  const [aiBotLastAction, setAiBotLastAction] = useState<string>('Bot standby - Click to Scan armed');
+
+  // 📸 Click-to-Scan (Phone Camera Shutter Mode) State
+  const [scanTriggerMode, setScanTriggerMode] = useState<'click_to_scan' | 'auto_scan'>('click_to_scan');
+  const [isShutterFlashing, setIsShutterFlashing] = useState<boolean>(false);
+  const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [capturedPhotoUrl, setCapturedPhotoUrl] = useState<string | null>(null);
 
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const scannerContainerId = 'qr-reader';
@@ -109,18 +117,23 @@ export default function App() {
   const lastScannedCodeRef = useRef<string | null>(null);
   const lastScannedTimeRef = useRef<number>(0);
   const entriesRef = useRef<EntryRecord[]>(entries);
-  const handleQrCodeSuccessRef = useRef<(text: string) => void>(() => {});
+  const handleQrCodeSuccessRef = useRef<(text: string, isManual?: boolean) => void>(() => {});
   const isCameraActiveRef = useRef<boolean>(false);
   const autoStopOnScanRef = useRef<boolean>(true);
 
   // 🤖 AI Bot Hardware & Memory Locks
   const aiBotModeRef = useRef<'single_shot' | 'smart_guard'>('single_shot');
+  const scanTriggerModeRef = useRef<'click_to_scan' | 'auto_scan'>('click_to_scan');
   const isHardLockedRef = useRef<boolean>(false);
   const aiBotLockedCodeRef = useRef<string | null>(null);
 
   useEffect(() => {
     aiBotModeRef.current = aiBotMode;
   }, [aiBotMode]);
+
+  useEffect(() => {
+    scanTriggerModeRef.current = scanTriggerMode;
+  }, [scanTriggerMode]);
 
   useEffect(() => {
     autoStopOnScanRef.current = autoStopOnScan;
@@ -224,6 +237,44 @@ export default function App() {
         osc.stop(now + idx * 0.05 + 0.14);
       });
     } catch {}
+  };
+
+  // 📸 Phone Camera Realistic Shutter Click Sound
+  const playCameraShutterSound = () => {
+    if (!soundEnabled) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      // Click 1: Mirror/Mechanical shutter click (high frequency snap)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(1400, now);
+      osc1.frequency.exponentialRampToValueAtTime(150, now + 0.035);
+      gain1.gain.setValueAtTime(0.4, now);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.035);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.04);
+
+      // Click 2: Shutter curtain release 45ms later
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(2400, now + 0.045);
+      osc2.frequency.exponentialRampToValueAtTime(110, now + 0.085);
+      gain2.gain.setValueAtTime(0.35, now + 0.045);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.085);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.045);
+      osc2.stop(now + 0.09);
+    } catch (e) {
+      console.warn('Shutter audio failed', e);
+    }
   };
 
   // Handle Student Registration
@@ -439,7 +490,12 @@ export default function App() {
     lastScannedCodeRef.current = null;
     lastScannedTimeRef.current = 0;
     setScanBanner(null);
-    setAiBotStatus('🟢 AI Bot: Active • Ready for Student Pass');
+    setCapturedPhotoUrl(null);
+    setAiBotStatus(
+      scanTriggerModeRef.current === 'click_to_scan'
+        ? '📸 AI Bot: Ready • Point camera at QR & Click to Scan'
+        : '🟢 AI Bot: Active • Ready for Student Pass'
+    );
     setAiBotLastAction('Scanner reset for next student');
 
     // If camera was stopped, start camera for next student pass
@@ -448,7 +504,115 @@ export default function App() {
     }
   };
 
-  const handleQrCodeSuccess = async (decodedText: string) => {
+  // 📸 Phone Camera "Click to Scan" Shutter Function
+  const captureAndScanPhoto = async () => {
+    if (isCapturing) return;
+
+    if (!isCameraActiveRef.current) {
+      await startCamera();
+      return;
+    }
+
+    // 1. Shutter sound & haptics (like clicking a photo in smartphone camera)
+    playCameraShutterSound();
+    triggerVibration([40, 20, 60]);
+
+    // 2. Visual flash animation across viewfinder
+    setIsShutterFlashing(true);
+    setTimeout(() => setIsShutterFlashing(false), 160);
+
+    // 3. Locate the live video stream element
+    const container = document.getElementById(scannerContainerId);
+    const video = container?.querySelector('video');
+
+    if (!video || video.readyState < 2) {
+      setAiBotStatus('⚠️ Camera stream initialize ho raha hai, kripya 1 second baad click karein');
+      return;
+    }
+
+    setIsCapturing(true);
+    setAiBotStatus('🤖 AI Bot: 📸 Photo Captured! Analyzing QR code from photo...');
+
+    try {
+      const width = video.videoWidth || video.clientWidth || 640;
+      const height = video.videoHeight || video.clientHeight || 480;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      if (!ctx) throw new Error('Canvas 2D context not available');
+
+      // Draw exact frozen frame from video
+      ctx.drawImage(video, 0, 0, width, height);
+
+      // Save preview of the captured photo
+      const photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      setCapturedPhotoUrl(photoDataUrl);
+
+      // Pass 1: jsQR full frame
+      let imageData = ctx.getImageData(0, 0, width, height);
+      let code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: 'attemptBoth'
+      });
+
+      // Pass 2: jsQR Center 75% crop if full frame did not catch it
+      if (!code) {
+        const cropW = Math.floor(width * 0.75);
+        const cropH = Math.floor(height * 0.75);
+        const cropX = Math.floor((width - cropW) / 2);
+        const cropY = Math.floor((height - cropH) / 2);
+        const cropData = ctx.getImageData(cropX, cropY, cropW, cropH);
+        code = jsQR(cropData.data, cropData.width, cropData.height, {
+          inversionAttempts: 'attemptBoth'
+        });
+      }
+
+      // Pass 3: Contrast boosted threshold pass
+      if (!code) {
+        const d = imageData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const avg = (d[i] + d[i + 1] + d[i + 2]) / 3;
+          const val = avg > 125 ? 255 : 0;
+          d[i] = val;
+          d[i + 1] = val;
+          d[i + 2] = val;
+        }
+        code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: 'attemptBoth'
+        });
+      }
+
+      if (code && code.data) {
+        setAiBotStatus('✨ AI Bot: Photo me QR Code detect ho gaya! Validating entry...');
+        await handleQrCodeSuccess(code.data, true);
+      } else {
+        // No QR detected in this photo
+        playDuplicateWarningSound();
+        triggerVibration([200, 100, 200]);
+        setScanBanner({
+          type: 'invalid',
+          message: '📷 Is photo me QR Code detect nahi hua!',
+          subMessage: 'Kripya student pass ka QR camera ke saamne laakar dobara "📸 Click to Scan" karein.'
+        });
+        setAiBotStatus('⚠️ AI Bot: Photo me QR nahi mila. QR samne laakar dobara Click karein.');
+        setAiBotLastAction('Photo Clicked • No QR detected');
+      }
+    } catch (err) {
+      console.error('Snapshot scan error', err);
+      setAiBotStatus('❌ Photo scan error. Kripya punah click karein.');
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const handleQrCodeSuccess = async (decodedText: string, isManualShutter = false) => {
+    // In click_to_scan mode, ignore live continuous video frames
+    if (!isManualShutter && scanTriggerModeRef.current === 'click_to_scan') {
+      return;
+    }
+
     // 1. HARD SYNCHRONOUS LOCK: If already processing or locked, drop frame instantly
     if (isHardLockedRef.current) return;
 
@@ -470,9 +634,9 @@ export default function App() {
     // AI Bot digital chime
     playAiBotChime();
 
-    // In Single-Shot mode (default) OR autoStopOnScan:
+    // In Single-Shot mode (default) OR Click-to-Scan OR autoStopOnScan:
     // KILL camera immediately so it stops dead
-    if (aiBotModeRef.current === 'single_shot' || autoStopOnScanRef.current) {
+    if (scanTriggerModeRef.current === 'click_to_scan' || aiBotModeRef.current === 'single_shot' || autoStopOnScanRef.current) {
       setAiBotStatus('🛡️ AI Bot: 1-Shot Captured! Camera auto-stopped.');
       setAiBotLastAction('1 Scan Captured • Camera Off');
       await stopCamera();
@@ -608,7 +772,13 @@ export default function App() {
       await html5QrCodeRef.current.start(
         { facingMode: facingMode },
         config,
-        (decodedText) => handleQrCodeSuccessRef.current(decodedText),
+        (decodedText) => {
+          // If in click_to_scan mode, do not auto-scan video frames! Only scan on shutter click
+          if (scanTriggerModeRef.current === 'click_to_scan') {
+            return;
+          }
+          handleQrCodeSuccessRef.current(decodedText, false);
+        },
         () => {
           // ignore scan frame errors
         }
@@ -1115,7 +1285,9 @@ export default function App() {
                             <span>🤖 AI Automatic Scan Bot</span>
                           </h4>
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                            {aiBotMode === 'single_shot' ? 'Strict 1-Scan (Auto-Off)' : 'Smart Filter: Ignore Same QR'}
+                            {scanTriggerMode === 'click_to_scan'
+                              ? '📸 Click-to-Scan (Phone Camera Shutter)'
+                              : '⚡ Auto 1-Shot Scan'}
                           </span>
                         </div>
                         <p className="text-xs text-slate-300 font-medium mt-0.5 flex items-center gap-1.5">
@@ -1126,27 +1298,26 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                      {/* AI Bot Mode Selector */}
+                      {/* Scan Trigger Mode Selector: Click-to-Scan vs Auto-Scan */}
                       <button
                         onClick={() => {
-                          const next = aiBotMode === 'single_shot' ? 'smart_guard' : 'single_shot';
-                          setAiBotMode(next);
-                          setAutoStopOnScan(next === 'single_shot');
+                          const next = scanTriggerMode === 'click_to_scan' ? 'auto_scan' : 'click_to_scan';
+                          setScanTriggerMode(next);
                           setAiBotStatus(
-                            next === 'single_shot'
-                              ? '🟢 AI Bot: 1-Shot Mode ON (QR dekhte hi 1 scan & camera auto-band)'
-                              : '🛡️ AI Bot: Smart Filter ON (Same QR block rahega, naya QR lega)'
+                            next === 'click_to_scan'
+                              ? '📸 AI Bot: Click-to-Scan ON (Phone camera shutter mode - Click to snap & scan)'
+                              : '⚡ AI Bot: Auto 1-Shot ON (QR samne aate hi auto-scan)'
                           );
                         }}
-                        title="AI Bot Mode Switch"
+                        title="Click to Scan Mode vs Auto Scan Switch"
                         className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                          aiBotMode === 'single_shot'
-                            ? 'bg-purple-600/30 text-purple-200 border-purple-500/50 shadow-sm'
-                            : 'bg-indigo-600/30 text-indigo-200 border-indigo-500/50'
+                          scanTriggerMode === 'click_to_scan'
+                            ? 'bg-pink-600/30 text-pink-200 border-pink-500/50 shadow-sm'
+                            : 'bg-purple-600/30 text-purple-200 border-purple-500/50'
                         }`}
                       >
-                        <Zap className="w-3.5 h-3.5 text-pink-400" />
-                        <span>{aiBotMode === 'single_shot' ? '⚡ 1-Scan & Auto-Band' : '🛡️ Smart Anti-Loop'}</span>
+                        <Aperture className="w-3.5 h-3.5 text-pink-400" />
+                        <span>{scanTriggerMode === 'click_to_scan' ? '📸 Click to Scan' : '⚡ Auto 1-Shot'}</span>
                       </button>
 
                       {/* Ready Next Student Scan */}
@@ -1187,6 +1358,11 @@ export default function App() {
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-white flex items-center gap-1">
                             <Bot className="w-3 h-3 text-pink-300" /> AI Bot Verified
                           </span>
+                          {capturedPhotoUrl && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/20 text-purple-300 flex items-center gap-1">
+                              <Camera className="w-3 h-3 text-pink-400" /> 📸 Photo Scanned
+                            </span>
+                          )}
                         </div>
                         <h4 className="text-base sm:text-lg font-extrabold leading-snug">
                           {scanBanner.message}
@@ -1216,7 +1392,7 @@ export default function App() {
                       <div className="flex items-center gap-2 text-[11px] text-slate-200">
                         <span className="text-pink-300 font-semibold flex items-center gap-1.5">
                           <Bot className="w-3.5 h-3.5 text-pink-400" />
-                          <span>🤖 AI Bot: 1-Shot Lock lag chuka hai. Repeat scan nahi hoga!</span>
+                          <span>🤖 AI Bot: Scan complete ho gaya hai. Repeat scan nahi hoga!</span>
                         </span>
                       </div>
 
@@ -1248,7 +1424,11 @@ export default function App() {
                             </span>
                           )}
                         </h3>
-                        <p className="text-[11px] text-slate-400">Strict Single-Scan Engine (No Repeat Loop)</p>
+                        <p className="text-[11px] text-slate-400">
+                          {scanTriggerMode === 'click_to_scan'
+                            ? '📸 Phone Camera Shutter Mode (Click to Scan)'
+                            : '⚡ Strict Single-Scan Engine (No Repeat Loop)'}
+                        </p>
                       </div>
                     </div>
 
@@ -1285,26 +1465,81 @@ export default function App() {
                   )}
 
                   {/* Scanner Viewfinder Box */}
-                  <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 min-h-[300px] sm:min-h-[360px] flex items-center justify-center">
+                  <div
+                    onClick={() => {
+                      if (isCameraActive && scanTriggerMode === 'click_to_scan' && !isCapturing) {
+                        captureAndScanPhoto();
+                      }
+                    }}
+                    className={`relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 min-h-[300px] sm:min-h-[380px] flex items-center justify-center select-none ${
+                      isCameraActive && scanTriggerMode === 'click_to_scan' ? 'cursor-pointer' : ''
+                    }`}
+                  >
                     {/* HTML5-QRCODE Mount Point */}
                     <div id={scannerContainerId} className="w-full h-full" />
 
-                    {/* Laser Overlay when active */}
+                    {/* Camera Shutter Flash Effect (White Screen Pulse like real camera flash) */}
+                    {isShutterFlashing && (
+                      <div className="absolute inset-0 bg-white z-40 pointer-events-none transition-opacity duration-150" />
+                    )}
+
+                    {/* Capturing / Analyzing Overlay */}
+                    {isCapturing && (
+                      <div className="absolute inset-0 bg-black/70 backdrop-blur-xs z-35 flex flex-col items-center justify-center text-white gap-3 p-4 pointer-events-none">
+                        <div className="w-12 h-12 border-3 border-pink-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-sm font-extrabold text-white bg-slate-900/90 px-4 py-1.5 rounded-full border border-pink-500/50 shadow-xl flex items-center gap-2">
+                          <Bot className="w-4 h-4 text-pink-400 animate-bounce" />
+                          <span>🤖 AI Bot Photo Scan Kar Raha Hai...</span>
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Reticle & Shutter Button Overlay when Camera is Active */}
                     {isCameraActive && (
-                      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4 z-20">
                         {/* Top AI Bot HUD indicator */}
-                        <div className="absolute top-3 px-3 py-1 rounded-full bg-slate-950/80 border border-pink-500/50 backdrop-blur-md flex items-center gap-2 text-[11px] text-pink-300 font-bold shadow-lg">
+                        <div className="px-3.5 py-1.5 rounded-full bg-slate-950/85 border border-pink-500/50 backdrop-blur-md flex items-center gap-2 text-[11px] text-pink-300 font-bold shadow-lg">
                           <Bot className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
-                          <span>AI BOT GUARD: 1-SHOT ARMED (No Duplicate Loop)</span>
+                          <span>
+                            {scanTriggerMode === 'click_to_scan'
+                              ? '📸 PHONE SHUTTER MODE: TAP OR CLICK TO SCAN'
+                              : '⚡ 1-SHOT AUTO SCAN (No Duplicate Loop)'}
+                          </span>
                         </div>
 
-                        <div className="relative w-64 h-64 border-2 border-dashed border-pink-500/60 rounded-2xl">
+                        {/* Centered Framing Box */}
+                        <div className="relative w-60 h-60 sm:w-64 sm:h-64 border-2 border-dashed border-pink-500/60 rounded-2xl flex items-center justify-center pointer-events-none">
                           <div className="absolute w-full h-0.5 bg-gradient-to-r from-transparent via-pink-400 to-transparent shadow-[0_0_8px_#ec4899] scanner-laser" />
                           {/* Corner Markers */}
-                          <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-pink-400" />
-                          <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-pink-400" />
-                          <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-pink-400" />
-                          <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-pink-400" />
+                          <div className="absolute -top-1 -left-1 w-5 h-5 border-t-2 border-l-2 border-pink-400" />
+                          <div className="absolute -top-1 -right-1 w-5 h-5 border-t-2 border-r-2 border-pink-400" />
+                          <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-2 border-l-2 border-pink-400" />
+                          <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-2 border-r-2 border-pink-400" />
+                          {/* Center Crosshair Target */}
+                          <div className="w-6 h-6 border border-pink-400/50 rounded-full flex items-center justify-center">
+                            <div className="w-1.5 h-1.5 bg-pink-400 rounded-full" />
+                          </div>
+                        </div>
+
+                        {/* Floating Big Phone Camera Shutter Button */}
+                        <div className="pointer-events-auto flex flex-col items-center gap-1.5 pb-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              captureAndScanPhoto();
+                            }}
+                            disabled={isCapturing}
+                            title="Click to Scan (Photo Khinchein)"
+                            className="group relative flex items-center justify-center w-18 h-18 sm:w-20 sm:h-20 rounded-full bg-white/20 backdrop-blur-md border-4 border-white shadow-2xl hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                          >
+                            <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-full bg-white group-hover:bg-pink-100 flex items-center justify-center shadow-inner transition">
+                              <Camera className="w-7 h-7 text-slate-900 group-hover:scale-110 transition-transform" />
+                            </div>
+                          </button>
+                          <span className="px-3 py-1 rounded-full text-[11px] font-black text-white bg-slate-950/85 backdrop-blur-md border border-white/20 shadow-md">
+                            {isCapturing ? '🤖 AI Scanning Photo...' : '📸 CLICK TO SCAN (Photo Khinchein)'}
+                          </span>
                         </div>
                       </div>
                     )}
@@ -1314,26 +1549,41 @@ export default function App() {
                       <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/95 z-10 animate-in fade-in duration-200">
                         {scanBanner ? (
                           <div className="max-w-md w-full flex flex-col items-center">
-                            <div className="relative mb-3">
-                              <div
-                                className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg ${
-                                  scanBanner.type === 'duplicate'
-                                    ? 'bg-red-500/20 text-red-400 border border-red-500/40 shadow-red-950/50'
-                                    : scanBanner.type === 'success'
-                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-emerald-950/50'
-                                    : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-amber-950/50'
-                                }`}
-                              >
-                                <Bot className="w-9 h-9 animate-bounce" />
+                            {/* If photo was snapped, show photo thumbnail */}
+                            {capturedPhotoUrl ? (
+                              <div className="relative mb-3 rounded-2xl overflow-hidden border-2 border-purple-500/50 shadow-2xl max-w-[200px] w-full bg-black">
+                                <img
+                                  src={capturedPhotoUrl}
+                                  alt="Captured Pass Snapshot"
+                                  className="w-full h-32 object-cover"
+                                />
+                                <div className="absolute bottom-1 right-1 px-2 py-0.5 rounded bg-black/80 text-[10px] text-pink-300 font-bold flex items-center gap-1">
+                                  <Camera className="w-3 h-3 text-pink-400" />
+                                  <span>📸 Clicked Photo</span>
+                                </div>
                               </div>
-                              <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-black shadow">
-                                ✓
-                              </span>
-                            </div>
+                            ) : (
+                              <div className="relative mb-3">
+                                <div
+                                  className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg ${
+                                    scanBanner.type === 'duplicate'
+                                      ? 'bg-red-500/20 text-red-400 border border-red-500/40 shadow-red-950/50'
+                                      : scanBanner.type === 'success'
+                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-emerald-950/50'
+                                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-amber-950/50'
+                                  }`}
+                                >
+                                  <Bot className="w-9 h-9 animate-bounce" />
+                                </div>
+                                <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-black shadow">
+                                  ✓
+                                </span>
+                              </div>
+                            )}
 
                             <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 mb-2">
                               <Bot className="w-3.5 h-3.5 text-pink-400" />
-                              <span>🤖 AI Bot: 1-Shot Lock • Camera Band</span>
+                              <span>🤖 AI Bot: Scan Complete • Camera Off</span>
                             </div>
 
                             <h4 className="text-lg sm:text-xl font-extrabold text-white mb-1">
@@ -1355,7 +1605,7 @@ export default function App() {
                             )}
 
                             <p className="text-[11px] text-slate-400 max-w-sm text-center mb-4">
-                              AI Bot ne QR detect karke sirf 1 baar scan kiya aur camera band kar diya hai taaki jab tak camera QR ke samne rahe repeat scan na ho.
+                              AI Bot ne photo capture karke QR detect kiya aur entry verify kar li hai. Agle student ke liye camera start karein.
                             </p>
 
                             <button
@@ -1373,7 +1623,7 @@ export default function App() {
                             </div>
                             <h4 className="text-base font-bold text-white mb-1">🤖 AI Bot Standby • Camera Off</h4>
                             <p className="text-xs text-slate-400 max-w-sm mb-4">
-                              Student ka QR ticket scan karne ke liye camera start karein. AI Bot QR dekhte hi sirf 1 baar scan karega aur camera auto-band kar dega.
+                              Student ka QR ticket scan karne ke liye camera start karein. Camera khulte hi "Click to Scan" button dabakar photo khinchein aur AI Bot turant scan karega!
                             </p>
                             <button
                               onClick={startCamera}
@@ -1387,6 +1637,24 @@ export default function App() {
                       </div>
                     )}
                   </div>
+
+                  {/* Primary "Click to Scan" Full Width CTA when Camera Active */}
+                  {isCameraActive && (
+                    <div className="mt-4 space-y-2">
+                      <button
+                        onClick={captureAndScanPhoto}
+                        disabled={isCapturing}
+                        className="w-full py-3.5 sm:py-4 px-6 rounded-2xl font-black text-white bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 shadow-xl shadow-pink-600/30 hover:brightness-110 active:scale-[0.98] transition cursor-pointer flex items-center justify-center gap-3 text-base sm:text-lg border-2 border-pink-400/50"
+                      >
+                        <Camera className="w-6 h-6 animate-pulse text-white" />
+                        <span>{isCapturing ? '🤖 AI Bot Photo Analyze Kar Raha Hai...' : '📸 CLICK TO SCAN (Photo Khinchein & AI Scan)'}</span>
+                        <Aperture className="w-5 h-5 text-pink-300 hidden sm:inline" />
+                      </button>
+                      <p className="text-center text-[11px] text-slate-400">
+                        💡 Phone camera ki tarah button dabayein ya camera screen par tap karein, photo click hogi aur AI Bot turant verify kar lega.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Scanner Controls Toolbar */}
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800">
