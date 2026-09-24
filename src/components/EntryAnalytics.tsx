@@ -27,6 +27,7 @@ export interface EntryRecord {
   roll: string;
   scannedAt: string;
   timestamp: number;
+  photoUrl?: string;
 }
 
 interface EntryAnalyticsProps {

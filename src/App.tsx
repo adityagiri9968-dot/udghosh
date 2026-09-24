@@ -33,16 +33,21 @@ import {
   Zap,
   Bot,
   Cpu,
-  Aperture
+  Aperture,
+  Upload,
+  Image as ImageIcon,
+  User,
+  Maximize2
 } from 'lucide-react';
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
 
-interface EntryRecord {
+export interface EntryRecord {
   id: string;
   name: string;
   roll: string;
   scannedAt: string;
   timestamp: number;
+  photoUrl?: string;
 }
 
 interface ScanBannerState {
@@ -53,7 +58,16 @@ interface ScanBannerState {
     name?: string;
     roll?: string;
     time?: string;
+    photoUrl?: string;
   };
+}
+
+interface RegisteredStudent {
+  id: string;
+  name: string;
+  roll: string;
+  photoUrl?: string;
+  registeredAt: number;
 }
 
 export default function App() {
@@ -69,14 +83,44 @@ export default function App() {
   // Student Registration State
   const [studentName, setStudentName] = useState<string>('');
   const [rollNumber, setRollNumber] = useState<string>('');
+  const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
+  const [photoUploadError, setPhotoUploadError] = useState<string>('');
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState<boolean>(false);
+  const [isSelfieCameraOpen, setIsSelfieCameraOpen] = useState<boolean>(false);
+  const [selectedPreviewPhoto, setSelectedPreviewPhoto] = useState<{ url: string; name: string; roll: string } | null>(null);
+
   const [registeredData, setRegisteredData] = useState<{
     id: string;
     name: string;
     roll: string;
+    photoUrl?: string;
     qrUrl: string;
   } | null>(null);
   const [isGeneratingPass, setIsGeneratingPass] = useState<boolean>(false);
   const [formError, setFormError] = useState<string>('');
+
+  // Registered students map with photos for fast lookup by roll
+  const [registeredStudents, setRegisteredStudents] = useState<Record<string, RegisteredStudent>>(() => {
+    try {
+      const saved = localStorage.getItem('fresher_party_registered_students');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const registeredStudentsRef = useRef<Record<string, RegisteredStudent>>(registeredStudents);
+  const selfieVideoRef = useRef<HTMLVideoElement | null>(null);
+  const selfieStreamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    registeredStudentsRef.current = registeredStudents;
+    try {
+      localStorage.setItem('fresher_party_registered_students', JSON.stringify(registeredStudents));
+    } catch (e) {
+      console.warn('Failed to save registered students', e);
+    }
+  }, [registeredStudents]);
 
   // Confirmed entries state (localStorage)
   const [entries, setEntries] = useState<EntryRecord[]>(() => {
@@ -277,6 +321,114 @@ export default function App() {
     }
   };
 
+  // Photo file upload & compression handler
+  const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setPhotoUploadError('Kripya valid image file (JPG, PNG, WebP) chunein.');
+      return;
+    }
+
+    setIsProcessingPhoto(true);
+    setPhotoUploadError('');
+
+    try {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const size = 260;
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            setIsProcessingPhoto(false);
+            return;
+          }
+
+          const minDim = Math.min(img.width, img.height);
+          const startX = (img.width - minDim) / 2;
+          const startY = (img.height - minDim) / 2;
+
+          ctx.drawImage(img, startX, startY, minDim, minDim, 0, 0, size, size);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          setStudentPhoto(dataUrl);
+          setIsProcessingPhoto(false);
+        };
+        img.onerror = () => {
+          setPhotoUploadError('Image process nahi ho saki. Doosri photo try karein.');
+          setIsProcessingPhoto(false);
+        };
+        img.src = event.target?.result as string;
+      };
+      reader.onerror = () => {
+        setPhotoUploadError('File reading error.');
+        setIsProcessingPhoto(false);
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setPhotoUploadError('Photo upload me samasya aayi.');
+      setIsProcessingPhoto(false);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  // Selfie Camera Helpers
+  const startSelfieCamera = async () => {
+    setPhotoUploadError('');
+    setIsSelfieCameraOpen(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } }
+      });
+      selfieStreamRef.current = stream;
+      if (selfieVideoRef.current) {
+        selfieVideoRef.current.srcObject = stream;
+        await selfieVideoRef.current.play();
+      }
+    } catch (err) {
+      console.error('Selfie camera error', err);
+      setPhotoUploadError('Camera access nahi mila. Kripya gallery se photo upload karein.');
+      setIsSelfieCameraOpen(false);
+    }
+  };
+
+  const stopSelfieCamera = () => {
+    if (selfieStreamRef.current) {
+      selfieStreamRef.current.getTracks().forEach((track) => track.stop());
+      selfieStreamRef.current = null;
+    }
+    setIsSelfieCameraOpen(false);
+  };
+
+  const captureSelfie = () => {
+    if (!selfieVideoRef.current) return;
+    try {
+      const video = selfieVideoRef.current;
+      const canvas = document.createElement('canvas');
+      const size = 260;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const minDim = Math.min(video.videoWidth || 300, video.videoHeight || 300);
+      const startX = ((video.videoWidth || 300) - minDim) / 2;
+      const startY = ((video.videoHeight || 300) - minDim) / 2;
+
+      ctx.drawImage(video, startX, startY, minDim, minDim, 0, 0, size, size);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      setStudentPhoto(dataUrl);
+      stopSelfieCamera();
+    } catch (e) {
+      console.error('Selfie capture failed', e);
+    }
+  };
+
   // Handle Student Registration
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -297,11 +449,25 @@ export default function App() {
     setIsGeneratingPass(true);
     try {
       const uniqueId = 'FP-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(Math.random() * 899 + 100);
-      const payload = {
+      const payload: { name: string; roll: string; id: string; photo?: string } = {
         name: cleanName,
         roll: cleanRoll,
         id: uniqueId
       };
+
+      // Save to registered students registry (mapping by roll number)
+      const studentRecord: RegisteredStudent = {
+        id: uniqueId,
+        name: cleanName,
+        roll: cleanRoll,
+        photoUrl: studentPhoto || undefined,
+        registeredAt: Date.now()
+      };
+
+      setRegisteredStudents((prev) => ({
+        ...prev,
+        [cleanRoll]: studentRecord
+      }));
 
       const qrDataUrl = await QRCode.toDataURL(JSON.stringify(payload), {
         errorCorrectionLevel: 'H',
@@ -317,6 +483,7 @@ export default function App() {
         id: uniqueId,
         name: cleanName,
         roll: cleanRoll,
+        photoUrl: studentPhoto || undefined,
         qrUrl: qrDataUrl
       });
 
@@ -338,6 +505,8 @@ export default function App() {
     setRegisteredData(null);
     setStudentName('');
     setRollNumber('');
+    setStudentPhoto(null);
+    setPhotoUploadError('');
     setFormError('');
   };
 
@@ -391,37 +560,82 @@ export default function App() {
     ctx.lineWidth = 3;
     ctx.strokeRect(30, 160, 640, 770);
 
-    // Student Info Card
-    ctx.fillStyle = 'rgba(30, 41, 59, 0.7)';
-    ctx.fillRect(50, 185, 600, 145);
-    ctx.strokeStyle = '#475569';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(50, 185, 600, 145);
-
-    // Name & Roll
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '16px sans-serif';
-    ctx.fillText('STUDENT NAME / VIDYARTHI KA NAAM', 75, 220);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 28px sans-serif';
-    ctx.fillText(registeredData.name, 75, 255);
-
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '16px sans-serif';
-    ctx.fillText('ROLL NUMBER', 430, 220);
-    ctx.fillStyle = '#38bdf8';
-    ctx.font = 'bold 26px sans-serif';
-    ctx.fillText(registeredData.roll, 430, 255);
-
-    ctx.fillStyle = '#a855f7';
-    ctx.font = '14px sans-serif';
-    ctx.fillText('PASS ID: ' + registeredData.id, 75, 305);
-
-    // QR Code Image
     const qrImg = new Image();
     qrImg.crossOrigin = 'anonymous';
-    qrImg.onload = () => {
+
+    const renderCanvasAndDownload = (photoImg?: HTMLImageElement | null) => {
+      // Student Info Card
+      ctx.fillStyle = 'rgba(30, 41, 59, 0.7)';
+      ctx.fillRect(50, 185, 600, 150);
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(50, 185, 600, 150);
+
+      if (photoImg) {
+        // Draw photo with rounded border on left: X = 70, Y = 198, size = 120
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(70, 198, 120, 124, 12);
+        ctx.clip();
+        ctx.drawImage(photoImg, 70, 198, 120, 124);
+        ctx.restore();
+
+        // Border around photo
+        ctx.strokeStyle = '#ec4899';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.roundRect(70, 198, 120, 124, 12);
+        ctx.stroke();
+
+        // Photo verified badge
+        ctx.fillStyle = '#ec4899';
+        ctx.fillRect(70, 304, 120, 18);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('VERIFIED PHOTO', 130, 317);
+
+        // Student Info on Right
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '15px sans-serif';
+        ctx.fillText('STUDENT NAME', 215, 222);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 26px sans-serif';
+        ctx.fillText(registeredData.name, 215, 252);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '15px sans-serif';
+        ctx.fillText('ROLL NUMBER', 215, 280);
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.fillText(registeredData.roll, 340, 280);
+
+        ctx.fillStyle = '#a855f7';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('PASS ID: ' + registeredData.id, 215, 314);
+      } else {
+        // Name & Roll (traditional layout)
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('STUDENT NAME / VIDYARTHI KA NAAM', 75, 220);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillText(registeredData.name, 75, 255);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('ROLL NUMBER', 430, 220);
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 26px sans-serif';
+        ctx.fillText(registeredData.roll, 430, 255);
+
+        ctx.fillStyle = '#a855f7';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('PASS ID: ' + registeredData.id, 75, 305);
+      }
+
       // White container for QR
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
@@ -450,6 +664,18 @@ export default function App() {
       link.download = `Udghosh_Fresher_Pass_${registeredData.roll.replace(/\s+/g, '_')}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
+    };
+
+    qrImg.onload = () => {
+      if (registeredData.photoUrl) {
+        const pImg = new Image();
+        pImg.crossOrigin = 'anonymous';
+        pImg.onload = () => renderCanvasAndDownload(pImg);
+        pImg.onerror = () => renderCanvasAndDownload(null);
+        pImg.src = registeredData.photoUrl;
+      } else {
+        renderCanvasAndDownload(null);
+      }
     };
     qrImg.src = registeredData.qrUrl;
   };
@@ -663,6 +889,10 @@ export default function App() {
         (item) => item.roll.trim().toUpperCase() === scannedRoll
       );
 
+      // Look up student photo from registered students map, payload, or existing entry
+      const matchedProfile = registeredStudentsRef.current[scannedRoll];
+      const studentPhotoFound = data.photo || matchedProfile?.photoUrl || existing?.photoUrl;
+
       if (existing) {
         // DUPLICATE ENTRY
         playDuplicateWarningSound();
@@ -674,7 +904,8 @@ export default function App() {
           details: {
             name: existing.name,
             roll: existing.roll,
-            time: existing.scannedAt
+            time: existing.scannedAt,
+            photoUrl: existing.photoUrl || studentPhotoFound
           }
         });
         setAiBotLastAction(`Duplicate Blocked: ${existing.name} (${existing.roll})`);
@@ -689,7 +920,8 @@ export default function App() {
             minute: '2-digit',
             second: '2-digit'
           }),
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          photoUrl: studentPhotoFound
         };
 
         playSuccessSound();
@@ -705,10 +937,12 @@ export default function App() {
         setScanBanner({
           type: 'success',
           message: `✅ Entry Confirmed! Welcome, ${studentNameScanned} (${scannedRoll})`,
+          subMessage: `Roll: ${scannedRoll} • Verified & Admitted`,
           details: {
             name: studentNameScanned,
             roll: scannedRoll,
-            time: newRecord.scannedAt
+            time: newRecord.scannedAt,
+            photoUrl: studentPhotoFound
           }
         });
         setAiBotLastAction(`Entry Confirmed: ${studentNameScanned} (${scannedRoll})`);
@@ -890,11 +1124,32 @@ export default function App() {
   };
 
   // Quick simulate sample QR for testing in development/preview
-  const handleSimulateScan = (name: string, roll: string) => {
+  const handleSimulateScan = (name: string, roll: string, photoUrl?: string) => {
+    const cleanRoll = roll.toUpperCase();
+    const defaultPhoto = photoUrl || (cleanRoll === '24ENG042'
+      ? 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=240&auto=format&fit=crop&q=80'
+      : cleanRoll === '24BCA019'
+      ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=240&auto=format&fit=crop&q=80'
+      : undefined);
+
+    if (defaultPhoto) {
+      setRegisteredStudents((prev) => ({
+        ...prev,
+        [cleanRoll]: {
+          id: 'FP-REG-' + cleanRoll,
+          name,
+          roll: cleanRoll,
+          photoUrl: defaultPhoto,
+          registeredAt: Date.now()
+        }
+      }));
+    }
+
     const fakePayload = JSON.stringify({
       id: 'FP-TEST-' + Math.floor(Math.random() * 9000 + 1000),
       name,
-      roll
+      roll: cleanRoll,
+      photo: defaultPhoto
     });
     handleQrCodeSuccess(fakePayload);
   };
@@ -903,17 +1158,17 @@ export default function App() {
   const handleGenerateDemoData = () => {
     const now = Date.now();
     const demoStudents = [
-      { name: 'Aarav Mehta', roll: '24ENG042', offsetMin: 28 },
-      { name: 'Pooja Verma', roll: '24BCA019', offsetMin: 25 },
-      { name: 'Rohan Deshmukh', roll: '24BBA102', offsetMin: 22 },
-      { name: 'Ananya Roy', roll: '24COM055', offsetMin: 18 },
-      { name: 'Karan Patel', roll: '24CS089', offsetMin: 16 },
-      { name: 'Simran Kaur', roll: '24IT031', offsetMin: 13 },
-      { name: 'Vikram Aditya', roll: '24ENG077', offsetMin: 12 },
-      { name: 'Sneha Gupta', roll: '24BCA063', offsetMin: 7 },
-      { name: 'Devendra Joshi', roll: '24CS112', offsetMin: 4 },
-      { name: 'Priya Sharma', roll: '24BBA044', offsetMin: 2 },
-      { name: 'Manish Kumar', roll: '24ENG015', offsetMin: 1 }
+      { name: 'Aarav Mehta', roll: '24ENG042', offsetMin: 28, photo: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Pooja Verma', roll: '24BCA019', offsetMin: 25, photo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Rohan Deshmukh', roll: '24BBA102', offsetMin: 22, photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Ananya Roy', roll: '24COM055', offsetMin: 18, photo: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Karan Patel', roll: '24CS089', offsetMin: 16, photo: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Simran Kaur', roll: '24IT031', offsetMin: 13, photo: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Vikram Aditya', roll: '24ENG077', offsetMin: 12, photo: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Sneha Gupta', roll: '24BCA063', offsetMin: 7, photo: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Devendra Joshi', roll: '24CS112', offsetMin: 4, photo: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Priya Sharma', roll: '24BBA044', offsetMin: 2, photo: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=240&auto=format&fit=crop&q=80' },
+      { name: 'Manish Kumar', roll: '24ENG015', offsetMin: 1, photo: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=240&auto=format&fit=crop&q=80' }
     ];
 
     const newDemoRecords: EntryRecord[] = demoStudents.map((s, index) => {
@@ -928,8 +1183,24 @@ export default function App() {
         name: s.name,
         roll: s.roll,
         scannedAt: timeStr,
-        timestamp: entryTimeMs
+        timestamp: entryTimeMs,
+        photoUrl: s.photo
       };
+    });
+
+    // Also register in registeredStudents
+    setRegisteredStudents((prev) => {
+      const updated = { ...prev };
+      demoStudents.forEach((d) => {
+        updated[d.roll.toUpperCase()] = {
+          id: 'FP-REG-' + d.roll,
+          name: d.name,
+          roll: d.roll.toUpperCase(),
+          photoUrl: d.photo,
+          registeredAt: now
+        };
+      });
+      return updated;
     });
 
     setEntries((prev) => {
@@ -1098,6 +1369,109 @@ export default function App() {
                     </p>
                   </div>
 
+                  {/* Photo Upload Section */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
+                        Student Photo / ID Photo (Vidyarthi Ki Photo)
+                      </label>
+                      <span className="text-[10px] text-pink-400 font-medium">Recommended for gate pass</span>
+                    </div>
+
+                    {photoUploadError && (
+                      <div className="mb-2 p-2 rounded-lg bg-red-950/60 border border-red-500/40 text-red-200 text-xs flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                        <span>{photoUploadError}</span>
+                      </div>
+                    )}
+
+                    {studentPhoto ? (
+                      /* Uploaded Photo Preview Card */
+                      <div className="p-3.5 rounded-xl bg-slate-900/90 border border-purple-500/40 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="relative w-16 h-16 rounded-xl overflow-hidden border-2 border-pink-500 shadow-md shrink-0">
+                            <img
+                              src={studentPhoto}
+                              alt="Uploaded student preview"
+                              className="w-full h-full object-cover"
+                            />
+                            <span className="absolute bottom-0 inset-x-0 bg-emerald-600/90 text-[9px] text-white font-bold text-center py-0.5">
+                              Uploaded
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-white block">Photo Safalta-purvak Chuni Gayi</span>
+                            <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1 mt-0.5">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Pass par print hogi
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <label className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 border border-slate-700 font-medium cursor-pointer transition">
+                            <span>Badlein</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handlePhotoFileChange}
+                              className="hidden"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setStudentPhoto(null)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition"
+                            title="Remove photo"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Empty Upload / Capture Options */
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {/* File Upload Option */}
+                        <label className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-slate-700 hover:border-pink-500/60 bg-slate-900/60 hover:bg-slate-900/90 transition cursor-pointer group text-center">
+                          <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 group-hover:scale-110 group-hover:text-pink-400 transition mb-1.5">
+                            <Upload className="w-4 h-4" />
+                          </div>
+                          <span className="text-xs font-bold text-white group-hover:text-pink-300">
+                            Upload from Gallery / Files
+                          </span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">
+                            PNG, JPG (Square / Passport)
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handlePhotoFileChange}
+                            className="hidden"
+                          />
+                        </label>
+
+                        {/* Live Selfie Camera Option */}
+                        <button
+                          type="button"
+                          onClick={startSelfieCamera}
+                          className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-slate-700 hover:border-purple-500/60 bg-slate-900/60 hover:bg-slate-900/90 transition cursor-pointer group text-center"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-pink-500/10 border border-pink-500/30 flex items-center justify-center text-pink-400 group-hover:scale-110 transition mb-1.5">
+                            <Camera className="w-4 h-4" />
+                          </div>
+                          <span className="text-xs font-bold text-white group-hover:text-purple-300">
+                            Camera se Selfie Lo
+                          </span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">
+                            Instant live photo capture
+                          </span>
+                        </button>
+                      </div>
+                    )}
+                    <p className="mt-1.5 text-[11px] text-slate-400">
+                      * Photo upload karne se pass par aapki photo aayegi aur gate par chehra verify hoga
+                    </p>
+                  </div>
+
                   <button
                     type="submit"
                     disabled={isGeneratingPass}
@@ -1142,14 +1516,36 @@ export default function App() {
 
                 {/* Pass Ticket Box */}
                 <div className="bg-slate-900/90 rounded-2xl p-5 border border-slate-700/80 mb-6 text-left relative">
-                  <div className="flex justify-between items-start mb-4 pb-3 border-b border-slate-800">
-                    <div>
-                      <span className="text-[11px] uppercase tracking-wider text-slate-400 block">Student Name</span>
-                      <span className="text-lg font-bold text-white">{registeredData.name}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[11px] uppercase tracking-wider text-slate-400 block">Roll Number</span>
-                      <span className="text-base font-bold text-pink-400">{registeredData.roll}</span>
+                  <div className="flex items-center gap-3.5 mb-4 pb-3 border-b border-slate-800">
+                    {registeredData.photoUrl ? (
+                      <div className="relative w-16 h-16 sm:w-18 sm:h-18 rounded-xl overflow-hidden border-2 border-pink-500 shadow-lg shrink-0">
+                        <img
+                          src={registeredData.photoUrl}
+                          alt={registeredData.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <span className="absolute bottom-0 inset-x-0 bg-pink-600 text-[8px] font-bold text-white text-center py-0.5">
+                          ID PHOTO
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex flex-col items-center justify-center text-slate-400 shrink-0">
+                        <User className="w-7 h-7 text-slate-500" />
+                        <span className="text-[8px] text-slate-400">No Photo</span>
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Student Name</span>
+                      <span className="text-lg font-bold text-white truncate block">{registeredData.name}</span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="px-2 py-0.5 rounded bg-pink-500/20 text-pink-400 font-mono font-bold text-xs border border-pink-500/30">
+                          {registeredData.roll}
+                        </span>
+                        <span className="text-[10px] text-purple-300 font-mono">
+                          ID: {registeredData.id}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -1344,26 +1740,62 @@ export default function App() {
                         : 'bg-amber-950/80 border-amber-500 text-amber-100 shadow-lg shadow-amber-950/50'
                     }`}
                   >
-                    <div className="flex items-start gap-3.5">
-                      {scanBanner.type === 'duplicate' ? (
-                        <AlertTriangle className="w-7 h-7 text-red-400 shrink-0 mt-0.5 animate-bounce" />
-                      ) : scanBanner.type === 'success' ? (
-                        <CheckCircle2 className="w-7 h-7 text-emerald-400 shrink-0 mt-0.5" />
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      {/* Student Registration Photo in Banner */}
+                      {scanBanner.details?.photoUrl ? (
+                        <div
+                          onClick={() =>
+                            setSelectedPreviewPhoto({
+                              url: scanBanner.details!.photoUrl!,
+                              name: scanBanner.details?.name || 'Student',
+                              roll: scanBanner.details?.roll || ''
+                            })
+                          }
+                          className="relative group cursor-pointer shrink-0 self-center sm:self-start"
+                          title="Click karke photo badi dekhein"
+                        >
+                          <div
+                            className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border-2 shadow-xl ${
+                              scanBanner.type === 'duplicate'
+                                ? 'border-red-400 ring-4 ring-red-500/20'
+                                : 'border-emerald-400 ring-4 ring-emerald-500/20'
+                            }`}
+                          >
+                            <img
+                              src={scanBanner.details.photoUrl}
+                              alt={scanBanner.details.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            />
+                          </div>
+                          <div className="absolute -bottom-1 -right-1 px-1.5 py-0.5 rounded bg-slate-900/90 text-[9px] font-bold text-slate-200 border border-slate-700 flex items-center gap-1 shadow">
+                            <Maximize2 className="w-2.5 h-2.5 text-pink-400" />
+                            <span>Photo</span>
+                          </div>
+                        </div>
                       ) : (
-                        <XCircle className="w-7 h-7 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-800/80 border border-slate-700 flex flex-col items-center justify-center text-slate-400 shrink-0 self-center sm:self-start">
+                          <User className="w-7 h-7 text-slate-500" />
+                          <span className="text-[9px] text-slate-400">No Photo</span>
+                        </div>
                       )}
 
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-white flex items-center gap-1">
                             <Bot className="w-3 h-3 text-pink-300" /> AI Bot Verified
                           </span>
+                          {scanBanner.details?.photoUrl && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Student Photo Matched
+                            </span>
+                          )}
                           {capturedPhotoUrl && (
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/20 text-purple-300 flex items-center gap-1">
-                              <Camera className="w-3 h-3 text-pink-400" /> 📸 Photo Scanned
+                              <Camera className="w-3 h-3 text-pink-400" /> 📸 Gate Photo Scanned
                             </span>
                           )}
                         </div>
+
                         <h4 className="text-base sm:text-lg font-extrabold leading-snug">
                           {scanBanner.message}
                         </h4>
@@ -1371,9 +1803,9 @@ export default function App() {
                           <p className="text-sm font-medium opacity-90 mt-0.5">{scanBanner.subMessage}</p>
                         )}
                         {scanBanner.details && (
-                          <div className="mt-2 text-xs flex flex-wrap gap-x-4 gap-y-1 opacity-80 font-mono">
-                            <span>Roll: {scanBanner.details.roll}</span>
-                            <span>Name: {scanBanner.details.name}</span>
+                          <div className="mt-2 text-xs flex flex-wrap gap-x-4 gap-y-1 opacity-90 font-mono bg-black/20 p-2 rounded-xl border border-white/10">
+                            <span>Roll: <strong className="text-pink-300">{scanBanner.details.roll}</strong></span>
+                            <span>Name: <strong className="text-white">{scanBanner.details.name}</strong></span>
                             <span>Time: {scanBanner.details.time}</span>
                           </div>
                         )}
@@ -1381,7 +1813,7 @@ export default function App() {
 
                       <button
                         onClick={handleNextScan}
-                        className="text-slate-400 hover:text-white p-1 rounded-lg"
+                        className="text-slate-400 hover:text-white p-1 rounded-lg self-start"
                         title="Dismiss & Ready Next Scan"
                       >
                         <X className="w-4 h-4" />
@@ -1549,18 +1981,56 @@ export default function App() {
                       <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/95 z-10 animate-in fade-in duration-200">
                         {scanBanner ? (
                           <div className="max-w-md w-full flex flex-col items-center">
-                            {/* If photo was snapped, show photo thumbnail */}
-                            {capturedPhotoUrl ? (
-                              <div className="relative mb-3 rounded-2xl overflow-hidden border-2 border-purple-500/50 shadow-2xl max-w-[200px] w-full bg-black">
-                                <img
-                                  src={capturedPhotoUrl}
-                                  alt="Captured Pass Snapshot"
-                                  className="w-full h-32 object-cover"
-                                />
-                                <div className="absolute bottom-1 right-1 px-2 py-0.5 rounded bg-black/80 text-[10px] text-pink-300 font-bold flex items-center gap-1">
-                                  <Camera className="w-3 h-3 text-pink-400" />
-                                  <span>📸 Clicked Photo</span>
-                                </div>
+                            {/* Dual Photo Match: Student Registration Photo & Gate Camera Photo */}
+                            {(scanBanner.details?.photoUrl || capturedPhotoUrl) ? (
+                              <div className="flex items-center justify-center gap-3 mb-3 flex-wrap">
+                                {scanBanner.details?.photoUrl && (
+                                  <div
+                                    onClick={() =>
+                                      setSelectedPreviewPhoto({
+                                        url: scanBanner.details!.photoUrl!,
+                                        name: scanBanner.details?.name || 'Student',
+                                        roll: scanBanner.details?.roll || ''
+                                      })
+                                    }
+                                    className="relative rounded-2xl overflow-hidden border-2 border-emerald-400/80 shadow-2xl max-w-[150px] w-full bg-black cursor-pointer group"
+                                    title="Click to zoom student photo"
+                                  >
+                                    <img
+                                      src={scanBanner.details.photoUrl}
+                                      alt="Student Registration Photo"
+                                      className="w-full h-28 object-cover group-hover:scale-105 transition"
+                                    />
+                                    <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/85 text-[9px] text-emerald-300 font-bold flex items-center gap-1">
+                                      <User className="w-2.5 h-2.5 text-emerald-400" />
+                                      <span>👤 ID Photo</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {capturedPhotoUrl && (
+                                  <div
+                                    onClick={() =>
+                                      setSelectedPreviewPhoto({
+                                        url: capturedPhotoUrl,
+                                        name: 'Gate Shutter Photo',
+                                        roll: scanBanner.details?.roll || ''
+                                      })
+                                    }
+                                    className="relative rounded-2xl overflow-hidden border-2 border-purple-500/80 shadow-2xl max-w-[150px] w-full bg-black cursor-pointer group"
+                                    title="Click to zoom gate photo"
+                                  >
+                                    <img
+                                      src={capturedPhotoUrl}
+                                      alt="Captured Gate Snapshot"
+                                      className="w-full h-28 object-cover group-hover:scale-105 transition"
+                                    />
+                                    <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/85 text-[9px] text-pink-300 font-bold flex items-center gap-1">
+                                      <Camera className="w-2.5 h-2.5 text-pink-400" />
+                                      <span>📸 Gate Photo</span>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <div className="relative mb-3">
@@ -1794,6 +2264,7 @@ export default function App() {
                       <thead>
                         <tr className="bg-slate-900/90 text-slate-400 border-b border-slate-800 uppercase text-[11px] tracking-wider">
                           <th className="py-3 px-4 w-12 text-center">S.No</th>
+                          <th className="py-3 px-4 w-16 text-center">Photo</th>
                           <th className="py-3 px-4">Student Name</th>
                           <th className="py-3 px-4">Roll Number</th>
                           <th className="py-3 px-4">Entry Time</th>
@@ -1808,6 +2279,31 @@ export default function App() {
                           >
                             <td className="py-3 px-4 text-center text-slate-400 font-mono text-xs">
                               {index + 1}
+                            </td>
+                            <td className="py-2 px-4 text-center">
+                              {record.photoUrl ? (
+                                <div
+                                  onClick={() =>
+                                    setSelectedPreviewPhoto({
+                                      url: record.photoUrl!,
+                                      name: record.name,
+                                      roll: record.roll
+                                    })
+                                  }
+                                  className="w-10 h-10 rounded-xl overflow-hidden border border-pink-500/50 mx-auto cursor-pointer hover:scale-110 transition shadow-sm"
+                                  title="Click karke photo dekhein"
+                                >
+                                  <img
+                                    src={record.photoUrl}
+                                    alt={record.name}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700/80 mx-auto flex items-center justify-center text-slate-500">
+                                  <User className="w-5 h-5 text-slate-500" />
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-4 font-semibold text-white">
                               {record.name}
@@ -1968,6 +2464,116 @@ export default function App() {
                 className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 transition cursor-pointer"
               >
                 Haan, Clear Karein
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* LIVE SELFIE CAMERA MODAL                                  */}
+      {/* ========================================================= */}
+      {isSelfieCameraOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="glass-card w-full max-w-sm rounded-3xl p-6 border border-pink-500/40 shadow-2xl text-center relative overflow-hidden">
+            <button
+              type="button"
+              onClick={stopSelfieCamera}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-full bg-slate-900/80 transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-pink-500/20 text-pink-300 border border-pink-500/40 mb-3">
+              <Camera className="w-3.5 h-3.5 text-pink-400" />
+              <span>Take Student Selfie</span>
+            </div>
+
+            <h3 className="text-lg font-bold text-white mb-1">Live Camera Se Photo Lein</h3>
+            <p className="text-xs text-slate-400 mb-4">Apna chehra square frame ke beech me rakhein</p>
+
+            <div className="relative w-60 h-60 mx-auto rounded-2xl overflow-hidden bg-black border-2 border-pink-500 shadow-xl mb-5 flex items-center justify-center">
+              <video
+                ref={selfieVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover transform -scale-x-100"
+              />
+              {/* Framing target */}
+              <div className="absolute inset-4 border-2 border-dashed border-white/70 rounded-xl pointer-events-none flex items-center justify-center">
+                <div className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={stopSelfieCamera}
+                className="flex-1 py-3 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={captureSelfie}
+                className="flex-1 py-3 rounded-xl text-xs font-bold text-white gradient-party shadow-lg shadow-pink-500/30 hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Camera className="w-4 h-4" />
+                <span>Photo Khinchein</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* ENLARGED PHOTO PREVIEW MODAL                              */}
+      {/* ========================================================= */}
+      {selectedPreviewPhoto && (
+        <div
+          onClick={() => setSelectedPreviewPhoto(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="glass-card w-full max-w-sm rounded-3xl p-6 border border-pink-500/40 shadow-2xl text-center relative cursor-default"
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedPreviewPhoto(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-full bg-slate-900/80 transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-pink-500/20 text-pink-300 border border-pink-500/40 mb-4">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Verified Student Identity Photo</span>
+            </div>
+
+            <div className="w-56 h-56 sm:w-64 sm:h-64 mx-auto rounded-2xl overflow-hidden border-2 border-pink-500 shadow-2xl mb-4 bg-black">
+              <img
+                src={selectedPreviewPhoto.url}
+                alt={selectedPreviewPhoto.name}
+                className="w-full h-full object-cover"
+              />
+            </div>
+
+            <h4 className="text-xl font-extrabold text-white">{selectedPreviewPhoto.name}</h4>
+            {selectedPreviewPhoto.roll && (
+              <p className="text-sm font-mono font-bold text-pink-400 mt-1">
+                Roll Number: {selectedPreviewPhoto.roll}
+              </p>
+            )}
+
+            <div className="mt-5 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSelectedPreviewPhoto(null)}
+                className="w-full py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition cursor-pointer"
+              >
+                Close Preview
               </button>
             </div>
           </div>
