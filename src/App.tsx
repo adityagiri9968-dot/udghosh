@@ -813,7 +813,7 @@ export default function App() {
     qrImg.src = registeredData.qrUrl;
   };
 
-  // Admin Pin Authentication (PIN: 7271)
+  // Admin Pin Authentication
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (pinInput === '7271') {
@@ -824,7 +824,7 @@ export default function App() {
       setPinError('');
       setCurrentView('admin');
     } else {
-      setPinError('Galat Pin! Kripya 7271 dalein.');
+      setPinError('Galat PIN! Kripya sahi PIN enter karein.');
     }
   };
 
@@ -836,13 +836,13 @@ export default function App() {
     setCurrentView('student');
   };
 
-  // Owner Code Authentication (Code: 9968 - masked input "code dikhe nahi")
+  // Owner Code Authentication (Masked input - code dikhe nahi)
   const handleOwnerCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setOwnerPinInput(val);
     setOwnerPinError('');
 
-    // "9968 ye code dalte login ho jaaye" - instant login when typing 9968!
+    // Instant login on entering the secret code
     if (val === '9968') {
       setIsOwner(true);
       sessionStorage.setItem('fresher_party_owner_logged_in', 'true');
@@ -861,7 +861,7 @@ export default function App() {
       setOwnerPinInput('');
       setCurrentView('owner');
     } else {
-      setOwnerPinError('Galat Owner Code! Kripya 9968 dalein.');
+      setOwnerPinError('Galat Code! Kripya sahi code enter karein.');
     }
   };
 
@@ -1611,7 +1611,7 @@ export default function App() {
               }`}
             >
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Admin Portal (7271)</span>
+              <span>Admin Portal</span>
             </button>
 
             <button
@@ -1653,7 +1653,7 @@ export default function App() {
           {currentView === 'owner' && (
             <div className="mt-3 inline-flex items-center gap-3 bg-amber-950/50 border border-amber-500/40 px-3.5 py-1.5 rounded-full text-xs text-amber-200">
               <Crown className="w-3.5 h-3.5 text-amber-400" />
-              <span>👑 Owner Mode Active (Code: 9968 Verified)</span>
+              <span>👑 Owner Mode Active</span>
               <button
                 onClick={handleOwnerLogout}
                 className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-300 px-2 py-0.5 rounded transition cursor-pointer"
@@ -2866,7 +2866,7 @@ export default function App() {
               setOwnerPinInput('');
             }
           }}
-          title="Owner Section Access (Code: 9968)"
+          title="Owner Section Access"
           className="w-12 h-12 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 text-black border border-amber-300 shadow-xl shadow-amber-500/30 flex items-center justify-center transition active:scale-95 cursor-pointer group hover:brightness-110"
         >
           <Crown className="w-6 h-6 group-hover:scale-110 transition-transform duration-300" />
@@ -2883,7 +2883,7 @@ export default function App() {
               setPinInput('');
             }
           }}
-          title="Admin Access Pin (Organizer Gate Entry - 7271)"
+          title="Admin Gate Scanner Access"
           className="w-12 h-12 rounded-full bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 shadow-xl shadow-black/50 flex items-center justify-center transition active:scale-95 cursor-pointer group"
         >
           <ShieldCheck className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform duration-300" />
@@ -2891,7 +2891,7 @@ export default function App() {
       </div>
 
       {/* ========================================================= */}
-      {/* OWNER PIN PROMPT MODAL (CODE: 9968 - CODE DIKHE NAHI)     */}
+      {/* OWNER PIN PROMPT MODAL (CONFIDENTIAL CODE)               */}
       {/* ========================================================= */}
       {showOwnerPinModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
@@ -2909,7 +2909,7 @@ export default function App() {
               </div>
               <h3 className="text-lg font-bold text-white">Owner Master Code Daalein</h3>
               <p className="text-xs text-slate-400 mt-1">
-                Keval College / Event Owner ke liye • Code hidden rahega
+                Keval Adhikrit Owner ke liye • Confidential Access
               </p>
             </div>
 
@@ -2922,22 +2922,23 @@ export default function App() {
             <form onSubmit={handleOwnerPinSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-amber-300/90 mb-1.5 text-center">
-                  Secret Code (Code dikhe nahi - Password Masked):
+                  Secret Passcode:
                 </label>
                 <div className="relative">
                   <input
                     type="password"
-                    maxLength={6}
+                    maxLength={8}
                     autoFocus
                     value={ownerPinInput}
                     onChange={handleOwnerCodeChange}
                     placeholder="••••"
+                    autoComplete="off"
                     className="w-full text-center tracking-widest text-3xl font-mono bg-slate-900 border border-amber-500/50 rounded-xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                   <Lock className="w-4 h-4 text-amber-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
-                <span className="block text-[11px] text-amber-300/80 text-center mt-2 font-medium">
-                  💡 9968 code daalte hi auto-login ho jayega
+                <span className="block text-[11px] text-slate-400 text-center mt-2 font-medium">
+                  🔒 Keval authorized owner ke liye confidential passcode
                 </span>
               </div>
 
@@ -2962,7 +2963,7 @@ export default function App() {
       )}
 
       {/* ========================================================= */}
-      {/* ADMIN PIN PROMPT MODAL (PIN: 7271)                        */}
+      {/* ADMIN PIN PROMPT MODAL (CONFIDENTIAL PIN)                 */}
       {/* ========================================================= */}
       {showPinModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
@@ -2978,7 +2979,7 @@ export default function App() {
               <div className="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/40 text-purple-300 flex items-center justify-center mx-auto mb-3">
                 <KeyRound className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-bold text-white">Admin Access Pin Daalein</h3>
+              <h3 className="text-lg font-bold text-white">Admin Access PIN Daalein</h3>
               <p className="text-xs text-slate-400 mt-1">Organizer gate entry scanner access karein</p>
             </div>
 
@@ -2992,18 +2993,19 @@ export default function App() {
               <div>
                 <input
                   type="password"
-                  maxLength={6}
+                  maxLength={8}
                   autoFocus
                   value={pinInput}
                   onChange={(e) => {
                     setPinInput(e.target.value);
                     if (pinError) setPinError('');
                   }}
-                  placeholder="Secret PIN daalein"
+                  placeholder="••••"
+                  autoComplete="off"
                   className="w-full text-center tracking-widest text-2xl font-mono bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
-                <span className="block text-[11px] text-slate-500 text-center mt-1.5">
-                  Keval Adhikrit Organizers ke liye
+                <span className="block text-[11px] text-slate-400 text-center mt-1.5">
+                  🔒 Keval Adhikrit Organizers ke liye • PIN confidential hai
                 </span>
               </div>
 
