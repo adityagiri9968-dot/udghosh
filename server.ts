@@ -247,16 +247,23 @@ app.post('/api/students/approve', (req, res) => {
     });
   }
 
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-IN', {
+  // Format in Indian Standard Time (Asia/Kolkata) with 12-hour AM/PM format
+  const istTimeStr = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit'
-  });
+    second: '2-digit',
+    hour12: true
+  }).format(new Date()).toUpperCase();
+
+  const clientTime = typeof req.body.scannedAt === 'string' && req.body.scannedAt.trim()
+    ? req.body.scannedAt.trim()
+    : istTimeStr;
+  const entryTimestamp = Number(req.body.timestamp) || Date.now();
 
   student.admitted = true;
-  student.admittedAt = timeStr;
-  student.admittedTimestamp = Date.now();
+  student.admittedAt = clientTime;
+  student.admittedTimestamp = entryTimestamp;
 
   studentsMap[student.roll.toUpperCase()] = student;
   saveStudents(studentsMap);
@@ -267,8 +274,8 @@ app.post('/api/students/approve', (req, res) => {
     roll: student.roll,
     phone: student.phone,
     course: student.course,
-    scannedAt: timeStr,
-    timestamp: Date.now(),
+    scannedAt: clientTime,
+    timestamp: entryTimestamp,
     photoUrl: student.photoUrl,
     approvedBy: approver || 'Gate Admin'
   };

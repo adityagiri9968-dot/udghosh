@@ -49,6 +49,7 @@ import {
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
 import { OwnerSection, StudentRecord } from './components/OwnerSection.tsx';
 import { AdminRegistrationsTab } from './components/AdminRegistrationsTab.tsx';
+import { formatScanTime } from './utils/timeFormat.ts';
 
 export interface EntryRecord {
   id: string;
@@ -1089,40 +1090,45 @@ export default function App() {
 
       if (existing || matchedProfile?.admitted) {
         // DUPLICATE ENTRY
+        const prevTime = formatScanTime(
+          existing?.scannedAt || matchedProfile?.admittedAt || existing?.timestamp || matchedProfile?.admittedTimestamp
+        );
         playDuplicateWarningSound();
         triggerVibration([300, 100, 300]);
         setScanBanner({
           type: 'duplicate',
           message: '⚠️ Pehle hi entry ho chuki hai!',
-          subMessage: `(Scanned at ${existing?.scannedAt || matchedProfile?.admittedAt || 'earlier'}) • 🤖 AI Bot duplicate guard`,
+          subMessage: `(Pehle Admitted: ${prevTime}) • 🤖 AI Bot duplicate guard`,
           details: {
             id: studentIdFound,
             name: existing?.name || studentNameScanned,
             roll: scannedRoll,
             phone: studentPhoneFound,
             course: studentCourseFound,
-            time: existing?.scannedAt || matchedProfile?.admittedAt,
+            time: prevTime,
             photoUrl: studentPhotoFound,
             alreadyAdmitted: true,
-            admittedAt: existing?.scannedAt || matchedProfile?.admittedAt
+            admittedAt: prevTime
           }
         });
         setAiBotLastAction(`Duplicate Blocked: ${studentNameScanned} (${scannedRoll})`);
       } else {
         // VALID PASS -> REQUIRE APPROVAL BUTTON (User: "admin ke scan kanre ke baaad aporve ka button ho")
+        const scanTimeNow = formatScanTime();
         playAiBotChime();
         triggerVibration([80, 40, 80]);
         setScanBanner({
           type: 'pending_approval',
           message: `📸 Pass Scan Ho Gaya: ${studentNameScanned}`,
-          subMessage: 'Vidyarthi ki photo aur details check karein, fir "Approve Entry" dabayein',
+          subMessage: `Scan Time: ${scanTimeNow} • Vidyarthi ki photo aur details check karein, fir "Approve Entry" dabayein`,
           details: {
             id: studentIdFound,
             name: studentNameScanned,
             roll: scannedRoll,
             phone: studentPhoneFound,
             course: studentCourseFound,
-            photoUrl: studentPhotoFound
+            photoUrl: studentPhotoFound,
+            time: scanTimeNow
           }
         });
         setAiBotLastAction(`Waiting for Approval: ${studentNameScanned} (${scannedRoll})`);
@@ -1167,26 +1173,22 @@ export default function App() {
     const cleanName = details.name || 'Student';
     const cleanPhone = details.phone || '';
     const cleanCourse = details.course || 'HJMC';
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-IN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
+    const nowMs = Date.now();
+    const timeStr = formatScanTime(nowMs);
 
     const newRecord: EntryRecord = {
-      id: details.id || 'FP-' + Date.now(),
+      id: details.id || 'FP-' + nowMs,
       name: cleanName,
       roll: cleanRoll,
       phone: cleanPhone,
       course: cleanCourse,
       scannedAt: timeStr,
-      timestamp: Date.now(),
+      timestamp: nowMs,
       photoUrl: details.photoUrl,
       approvedBy: 'Gate Admin'
     };
 
-    // 1. Post to backend server so other devices see the approval!
+    // 1. Post to backend server so other devices see the approval with exact IST time!
     try {
       await fetch('/api/students/approve', {
         method: 'POST',
@@ -1194,7 +1196,9 @@ export default function App() {
         body: JSON.stringify({
           roll: cleanRoll,
           id: details.id,
-          approver: 'Gate Admin'
+          approver: 'Gate Admin',
+          scannedAt: timeStr,
+          timestamp: nowMs
         })
       });
     } catch (e) {
@@ -1224,7 +1228,7 @@ export default function App() {
             ...match,
             admitted: true,
             admittedAt: timeStr,
-            admittedTimestamp: Date.now()
+            admittedTimestamp: nowMs
           }
         };
       }
@@ -1453,11 +1457,7 @@ export default function App() {
 
     const newDemoRecords: EntryRecord[] = demoStudents.map((s, index) => {
       const entryTimeMs = now - s.offsetMin * 60 * 1000 - Math.floor(Math.random() * 40000);
-      const timeStr = new Date(entryTimeMs).toLocaleTimeString('en-IN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
+      const timeStr = formatScanTime(entryTimeMs);
       return {
         id: `FP-DEMO-${1000 + index}`,
         name: s.name,
@@ -1514,9 +1514,9 @@ export default function App() {
       index + 1,
       `"${e.name.replace(/"/g, '""')}"`,
       `"${e.roll}"`,
-      `"${e.scannedAt}"`,
+      `"${formatScanTime(e.scannedAt || e.timestamp)}"`,
       `"${e.id}"`,
-      `"${new Date(e.timestamp).toLocaleString('en-IN')}"`
+      `"${new Date(e.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}"`
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -2276,7 +2276,10 @@ export default function App() {
                               <span>Phone: <strong className="text-emerald-300">{scanBanner.details.phone}</strong></span>
                             )}
                             {scanBanner.details.time && (
-                              <span>Time: {scanBanner.details.time}</span>
+                              <span className="flex items-center gap-1 text-amber-300 font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Time: <strong className="text-white">{scanBanner.details.time}</strong></span>
+                              </span>
                             )}
                           </div>
                         )}
@@ -2817,7 +2820,7 @@ export default function App() {
                             </td>
                             <td className="py-3 px-4 text-slate-300 flex items-center gap-1.5">
                               <Clock className="w-3.5 h-3.5 text-slate-400" />
-                              <span>{record.scannedAt}</span>
+                              <span>{formatScanTime(record.scannedAt || record.timestamp)}</span>
                             </td>
                             <td className="py-3 px-4 text-right font-mono text-[11px] text-slate-400">
                               {record.id}

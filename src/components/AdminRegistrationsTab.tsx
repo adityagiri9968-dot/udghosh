@@ -16,6 +16,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { StudentRecord } from './OwnerSection.tsx';
+import { formatScanTime } from '../utils/timeFormat.ts';
 
 interface AdminRegistrationsTabProps {
   students: StudentRecord[];
@@ -73,7 +74,7 @@ export const AdminRegistrationsTab: React.FC<AdminRegistrationsTabProps> = ({
       `"${s.phone || 'N/A'}"`,
       `"${s.course || 'HJMC'}"`,
       `"${s.admitted ? 'Admitted' : 'Pending'}"`,
-      `"${s.admittedAt || '-'}"`,
+      `"${s.admitted ? (s.admittedAt ? formatScanTime(s.admittedAt) : 'Done') : '-'}"`,
       `"${s.id}"`
     ]);
 
@@ -350,7 +351,7 @@ export const AdminRegistrationsTab: React.FC<AdminRegistrationsTabProps> = ({
                       {student.admitted ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Admitted ({student.admittedAt || 'Done'})</span>
+                          <span>Admitted ({student.admittedAt ? formatScanTime(student.admittedAt) : 'Done'})</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30">

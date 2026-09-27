@@ -20,6 +20,7 @@ import {
   Sparkles,
   Users
 } from 'lucide-react';
+import { formatAnalyticsTime } from '../utils/timeFormat.ts';
 
 export interface EntryRecord {
   id: string;
@@ -64,11 +65,7 @@ export const EntryAnalytics: React.FC<EntryAnalyticsProps> = ({
   }, []);
 
   const formatShortTime = (ms: number): string => {
-    return new Date(ms).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
+    return formatAnalyticsTime(ms);
   };
 
   // Generate buckets based on selected time interval

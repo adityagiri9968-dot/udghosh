@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   User
 } from 'lucide-react';
+import { formatScanTime } from '../utils/timeFormat.ts';
 
 export interface StudentRecord {
   id: string;
@@ -103,7 +104,7 @@ export const OwnerSection: React.FC<OwnerSectionProps> = ({
       `"${s.phone || 'N/A'}"`,
       `"${s.course || 'HJMC'}"`,
       `"${s.admitted ? 'ARRIVED / ADMITTED' : 'NOT ARRIVED'}"`,
-      `"${s.admittedAt || '-'}"`,
+      `"${s.admitted ? (s.admittedAt ? formatScanTime(s.admittedAt) : 'ARRIVED') : '-'}"`,
       `"${s.id}"`,
       `"${new Date(s.registeredAt).toLocaleString('en-IN')}"`
     ]);
@@ -433,7 +434,7 @@ export const OwnerSection: React.FC<OwnerSectionProps> = ({
                     {/* Entry Time */}
                     <td className="py-3.5 px-4 font-mono text-xs text-slate-300">
                       {student.admitted ? (
-                        <span className="text-emerald-300 font-bold">{student.admittedAt || 'Recorded'}</span>
+                        <span className="text-emerald-300 font-bold">{student.admittedAt ? formatScanTime(student.admittedAt) : 'Recorded'}</span>
                       ) : (
                         <span className="text-slate-500">—</span>
                       )}
