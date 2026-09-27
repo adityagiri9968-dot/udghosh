@@ -37,52 +37,87 @@ import {
   Upload,
   Image as ImageIcon,
   User,
-  Maximize2
+  Maximize2,
+  Crown,
+  Phone,
+  Check,
+  GraduationCap,
+  Eye,
+  EyeOff,
+  Lock
 } from 'lucide-react';
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
+import { OwnerSection, StudentRecord } from './components/OwnerSection.tsx';
+import { AdminRegistrationsTab } from './components/AdminRegistrationsTab.tsx';
 
 export interface EntryRecord {
   id: string;
   name: string;
   roll: string;
+  phone?: string;
+  course?: string;
   scannedAt: string;
   timestamp: number;
   photoUrl?: string;
+  approvedBy?: string;
 }
 
 interface ScanBannerState {
-  type: 'success' | 'duplicate' | 'invalid';
+  type: 'success' | 'duplicate' | 'invalid' | 'pending_approval';
   message: string;
   subMessage?: string;
   details?: {
+    id?: string;
     name?: string;
     roll?: string;
+    phone?: string;
+    course?: string;
     time?: string;
     photoUrl?: string;
+    alreadyAdmitted?: boolean;
+    admittedAt?: string;
   };
 }
 
-interface RegisteredStudent {
+export interface RegisteredStudent {
   id: string;
   name: string;
   roll: string;
+  phone: string;
+  course: string;
   photoUrl?: string;
   registeredAt: number;
+  admitted?: boolean;
+  admittedAt?: string;
+  admittedTimestamp?: number;
 }
 
 export default function App() {
-  // App view state
+  // Navigation / View State
+  const [currentView, setCurrentView] = useState<'student' | 'admin' | 'owner'>('student');
+
+  // Admin view state (PIN: 7271)
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     return sessionStorage.getItem('fresher_party_admin_logged_in') === 'true';
   });
-  const [adminTab, setAdminTab] = useState<'scanner' | 'entries'>('scanner');
+  const [adminTab, setAdminTab] = useState<'scanner' | 'registrations' | 'entries'>('scanner');
   const [showPinModal, setShowPinModal] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState<string>('');
   const [pinError, setPinError] = useState<string>('');
 
+  // Owner view state (PIN: 9968 - hidden password)
+  const [isOwner, setIsOwner] = useState<boolean>(() => {
+    return sessionStorage.getItem('fresher_party_owner_logged_in') === 'true';
+  });
+  const [showOwnerPinModal, setShowOwnerPinModal] = useState<boolean>(false);
+  const [ownerPinInput, setOwnerPinInput] = useState<string>('');
+  const [ownerPinError, setOwnerPinError] = useState<string>('');
+
   // Student Registration State
   const [studentName, setStudentName] = useState<string>('');
   const [rollNumber, setRollNumber] = useState<string>('');
+  const [phoneNumber, setPhoneNumber] = useState<string>('');
+  const [studentCourse, setStudentCourse] = useState<string>('HJMC'); // Default HJMC as requested
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
   const [photoUploadError, setPhotoUploadError] = useState<string>('');
   const [isProcessingPhoto, setIsProcessingPhoto] = useState<boolean>(false);
@@ -93,6 +128,8 @@ export default function App() {
     id: string;
     name: string;
     roll: string;
+    phone: string;
+    course: string;
     photoUrl?: string;
     qrUrl: string;
   } | null>(null);
@@ -121,6 +158,44 @@ export default function App() {
       console.warn('Failed to save registered students', e);
     }
   }, [registeredStudents]);
+
+  // Synchronize state with backend server so all phones share data in real-time
+  const syncWithBackend = async () => {
+    try {
+      const [resStudents, resEntries] = await Promise.all([
+        fetch('/api/students'),
+        fetch('/api/entries')
+      ]);
+
+      if (resStudents.ok) {
+        const data = await resStudents.json();
+        if (data.students && Array.isArray(data.students)) {
+          const map: Record<string, RegisteredStudent> = {};
+          for (const s of data.students) {
+            map[s.roll.toUpperCase()] = s;
+          }
+          setRegisteredStudents(map);
+          registeredStudentsRef.current = map;
+        }
+      }
+
+      if (resEntries.ok) {
+        const data = await resEntries.json();
+        if (data.entries && Array.isArray(data.entries)) {
+          setEntries(data.entries);
+          entriesRef.current = data.entries;
+        }
+      }
+    } catch (e) {
+      // Backend sync error fallback
+    }
+  };
+
+  useEffect(() => {
+    syncWithBackend();
+    const interval = setInterval(syncWithBackend, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Confirmed entries state (localStorage)
   const [entries, setEntries] = useState<EntryRecord[]>(() => {
@@ -436,6 +511,8 @@ export default function App() {
 
     const cleanName = studentName.trim();
     const cleanRoll = rollNumber.trim().toUpperCase();
+    const cleanPhone = phoneNumber.trim();
+    const cleanCourse = studentCourse.trim() || 'HJMC';
 
     if (!cleanName) {
       setFormError('Kripya apna poora naam likhein.');
@@ -445,13 +522,23 @@ export default function App() {
       setFormError('Kripya apna College Roll Number dalein.');
       return;
     }
+    if (!cleanPhone) {
+      setFormError('Kripya apna 10-digit Phone Number dalein.');
+      return;
+    }
+    if (!/^\d{10}$/.test(cleanPhone)) {
+      setFormError('Kripya sahi 10-digit Mobile Number dalein (e.g. 9876543210).');
+      return;
+    }
 
     setIsGeneratingPass(true);
     try {
-      const uniqueId = 'FP-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(Math.random() * 899 + 100);
-      const payload: { name: string; roll: string; id: string; photo?: string } = {
+      const uniqueId = 'FP-HJMC-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(Math.random() * 899 + 100);
+      const payload = {
         name: cleanName,
         roll: cleanRoll,
+        phone: cleanPhone,
+        course: cleanCourse,
         id: uniqueId
       };
 
@@ -460,9 +547,23 @@ export default function App() {
         id: uniqueId,
         name: cleanName,
         roll: cleanRoll,
+        phone: cleanPhone,
+        course: cleanCourse,
         photoUrl: studentPhoto || undefined,
-        registeredAt: Date.now()
+        registeredAt: Date.now(),
+        admitted: false
       };
+
+      // Save to central server so ALL devices see the student and photo!
+      try {
+        await fetch('/api/students', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(studentRecord)
+        });
+      } catch (err) {
+        console.warn('Backend server save error', err);
+      }
 
       setRegisteredStudents((prev) => ({
         ...prev,
@@ -483,6 +584,8 @@ export default function App() {
         id: uniqueId,
         name: cleanName,
         roll: cleanRoll,
+        phone: cleanPhone,
+        course: cleanCourse,
         photoUrl: studentPhoto || undefined,
         qrUrl: qrDataUrl
       });
@@ -505,6 +608,8 @@ export default function App() {
     setRegisteredData(null);
     setStudentName('');
     setRollNumber('');
+    setPhoneNumber('');
+    setStudentCourse('HJMC');
     setStudentPhoto(null);
     setPhotoUploadError('');
     setFormError('');
@@ -598,42 +703,70 @@ export default function App() {
         // Student Info on Right
         ctx.textAlign = 'left';
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '15px sans-serif';
-        ctx.fillText('STUDENT NAME', 215, 222);
+        ctx.font = '14px sans-serif';
+        ctx.fillText('STUDENT NAME', 215, 218);
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 26px sans-serif';
-        ctx.fillText(registeredData.name, 215, 252);
+        ctx.font = 'bold 24px sans-serif';
+        ctx.fillText(registeredData.name, 215, 245);
 
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '15px sans-serif';
-        ctx.fillText('ROLL NUMBER', 215, 280);
+        ctx.font = '13px sans-serif';
+        ctx.fillText('ROLL NO: ', 215, 273);
         ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 24px sans-serif';
-        ctx.fillText(registeredData.roll, 340, 280);
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(registeredData.roll, 285, 273);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('COURSE: ', 430, 273);
+        ctx.fillStyle = '#ec4899';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(registeredData.course || 'HJMC', 495, 273);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('PHONE: ', 215, 302);
+        ctx.fillStyle = '#10b981';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(registeredData.phone || 'N/A', 280, 302);
 
         ctx.fillStyle = '#a855f7';
-        ctx.font = '13px sans-serif';
-        ctx.fillText('PASS ID: ' + registeredData.id, 215, 314);
+        ctx.font = '12px sans-serif';
+        ctx.fillText('ID: ' + registeredData.id, 430, 302);
       } else {
         // Name & Roll (traditional layout)
         ctx.textAlign = 'left';
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '16px sans-serif';
-        ctx.fillText('STUDENT NAME / VIDYARTHI KA NAAM', 75, 220);
+        ctx.font = '15px sans-serif';
+        ctx.fillText('STUDENT NAME', 75, 216);
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 28px sans-serif';
-        ctx.fillText(registeredData.name, 75, 255);
+        ctx.font = 'bold 26px sans-serif';
+        ctx.fillText(registeredData.name, 75, 246);
 
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '16px sans-serif';
-        ctx.fillText('ROLL NUMBER', 430, 220);
+        ctx.font = '14px sans-serif';
+        ctx.fillText('ROLL: ', 75, 280);
         ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 26px sans-serif';
-        ctx.fillText(registeredData.roll, 430, 255);
+        ctx.font = 'bold 20px sans-serif';
+        ctx.fillText(registeredData.roll, 130, 280);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('COURSE: ', 260, 280);
+        ctx.fillStyle = '#ec4899';
+        ctx.font = 'bold 20px sans-serif';
+        ctx.fillText(registeredData.course || 'HJMC', 335, 280);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('PHONE: ', 75, 312);
+        ctx.fillStyle = '#10b981';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(registeredData.phone || 'N/A', 145, 312);
 
         ctx.fillStyle = '#a855f7';
-        ctx.font = '14px sans-serif';
-        ctx.fillText('PASS ID: ' + registeredData.id, 75, 305);
+        ctx.font = '13px sans-serif';
+        ctx.fillText('PASS ID: ' + registeredData.id, 380, 312);
       }
 
       // White container for QR
@@ -680,7 +813,7 @@ export default function App() {
     qrImg.src = registeredData.qrUrl;
   };
 
-  // Admin Pin Authentication
+  // Admin Pin Authentication (PIN: 7271)
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (pinInput === '7271') {
@@ -689,8 +822,9 @@ export default function App() {
       setShowPinModal(false);
       setPinInput('');
       setPinError('');
+      setCurrentView('admin');
     } else {
-      setPinError('Galat Pin!');
+      setPinError('Galat Pin! Kripya 7271 dalein.');
     }
   };
 
@@ -699,6 +833,42 @@ export default function App() {
     setIsAdmin(false);
     sessionStorage.removeItem('fresher_party_admin_logged_in');
     setScanBanner(null);
+    setCurrentView('student');
+  };
+
+  // Owner Code Authentication (Code: 9968 - masked input "code dikhe nahi")
+  const handleOwnerCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setOwnerPinInput(val);
+    setOwnerPinError('');
+
+    // "9968 ye code dalte login ho jaaye" - instant login when typing 9968!
+    if (val === '9968') {
+      setIsOwner(true);
+      sessionStorage.setItem('fresher_party_owner_logged_in', 'true');
+      setShowOwnerPinModal(false);
+      setOwnerPinInput('');
+      setCurrentView('owner');
+    }
+  };
+
+  const handleOwnerPinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (ownerPinInput === '9968') {
+      setIsOwner(true);
+      sessionStorage.setItem('fresher_party_owner_logged_in', 'true');
+      setShowOwnerPinModal(false);
+      setOwnerPinInput('');
+      setCurrentView('owner');
+    } else {
+      setOwnerPinError('Galat Owner Code! Kripya 9968 dalein.');
+    }
+  };
+
+  const handleOwnerLogout = () => {
+    setIsOwner(false);
+    sessionStorage.removeItem('fresher_party_owner_logged_in');
+    setCurrentView('student');
   };
 
   // QR Scanning Logic with AI Automatic Bot Anti-Repeat Lock & Instant Stop
@@ -883,69 +1053,79 @@ export default function App() {
 
       const scannedRoll = String(data.roll).trim().toUpperCase();
       const studentNameScanned = String(data.name).trim();
+      const studentPhoneScanned = String(data.phone || '').trim();
+      const studentCourseScanned = String(data.course || 'HJMC').trim();
 
-      // Check duplicate using entriesRef to prevent stale closure
+      // Look up student from registered students map
+      let matchedProfile = registeredStudentsRef.current[scannedRoll];
+
+      // CROSS-DEVICE FIX: If profile or photo not found in local cache, fetch from central server!
+      if (!matchedProfile || !matchedProfile.photoUrl) {
+        try {
+          const res = await fetch(`/api/students/${scannedRoll}`);
+          if (res.ok) {
+            const serverRecord: RegisteredStudent = await res.json();
+            matchedProfile = serverRecord;
+            setRegisteredStudents((prev) => ({
+              ...prev,
+              [scannedRoll]: serverRecord
+            }));
+            registeredStudentsRef.current[scannedRoll] = serverRecord;
+          }
+        } catch (e) {
+          console.warn('Could not fetch student from server API', e);
+        }
+      }
+
+      // Check duplicate using entriesRef OR matchedProfile.admitted
       const existing = entriesRef.current.find(
         (item) => item.roll.trim().toUpperCase() === scannedRoll
       );
 
-      // Look up student photo from registered students map, payload, or existing entry
-      const matchedProfile = registeredStudentsRef.current[scannedRoll];
       const studentPhotoFound = data.photo || matchedProfile?.photoUrl || existing?.photoUrl;
+      const studentPhoneFound = studentPhoneScanned || matchedProfile?.phone || existing?.phone || '';
+      const studentCourseFound = studentCourseScanned || matchedProfile?.course || existing?.course || 'HJMC';
+      const studentIdFound = data.id || matchedProfile?.id || existing?.id || 'FP-' + Date.now();
 
-      if (existing) {
+      if (existing || matchedProfile?.admitted) {
         // DUPLICATE ENTRY
         playDuplicateWarningSound();
         triggerVibration([300, 100, 300]);
         setScanBanner({
           type: 'duplicate',
           message: '⚠️ Pehle hi entry ho chuki hai!',
-          subMessage: `(Scanned at ${existing.scannedAt}) • 🤖 AI Bot duplicate guard`,
+          subMessage: `(Scanned at ${existing?.scannedAt || matchedProfile?.admittedAt || 'earlier'}) • 🤖 AI Bot duplicate guard`,
           details: {
-            name: existing.name,
-            roll: existing.roll,
-            time: existing.scannedAt,
-            photoUrl: existing.photoUrl || studentPhotoFound
+            id: studentIdFound,
+            name: existing?.name || studentNameScanned,
+            roll: scannedRoll,
+            phone: studentPhoneFound,
+            course: studentCourseFound,
+            time: existing?.scannedAt || matchedProfile?.admittedAt,
+            photoUrl: studentPhotoFound,
+            alreadyAdmitted: true,
+            admittedAt: existing?.scannedAt || matchedProfile?.admittedAt
           }
         });
-        setAiBotLastAction(`Duplicate Blocked: ${existing.name} (${existing.roll})`);
+        setAiBotLastAction(`Duplicate Blocked: ${studentNameScanned} (${scannedRoll})`);
       } else {
-        // NEW VALID ENTRY
-        const newRecord: EntryRecord = {
-          id: data.id || 'FP-' + Date.now(),
-          name: studentNameScanned,
-          roll: scannedRoll,
-          scannedAt: new Date().toLocaleTimeString('en-IN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-          }),
-          timestamp: Date.now(),
-          photoUrl: studentPhotoFound
-        };
-
-        playSuccessSound();
-        triggerVibration([100, 50, 100]);
-        confetti({
-          particleCount: 45,
-          spread: 55,
-          origin: { y: 0.5 }
-        });
-
-        entriesRef.current = [newRecord, ...entriesRef.current];
-        setEntries((prev) => [newRecord, ...prev]);
+        // VALID PASS -> REQUIRE APPROVAL BUTTON (User: "admin ke scan kanre ke baaad aporve ka button ho")
+        playAiBotChime();
+        triggerVibration([80, 40, 80]);
         setScanBanner({
-          type: 'success',
-          message: `✅ Entry Confirmed! Welcome, ${studentNameScanned} (${scannedRoll})`,
-          subMessage: `Roll: ${scannedRoll} • Verified & Admitted`,
+          type: 'pending_approval',
+          message: `📸 Pass Scan Ho Gaya: ${studentNameScanned}`,
+          subMessage: 'Vidyarthi ki photo aur details check karein, fir "Approve Entry" dabayein',
           details: {
+            id: studentIdFound,
             name: studentNameScanned,
             roll: scannedRoll,
-            time: newRecord.scannedAt,
+            phone: studentPhoneFound,
+            course: studentCourseFound,
             photoUrl: studentPhotoFound
           }
         });
-        setAiBotLastAction(`Entry Confirmed: ${studentNameScanned} (${scannedRoll})`);
+        setAiBotLastAction(`Waiting for Approval: ${studentNameScanned} (${scannedRoll})`);
       }
     } catch {
       playDuplicateWarningSound();
@@ -971,6 +1151,102 @@ export default function App() {
         setAiBotStatus('🤖 AI Bot: Ready for NEXT pass (same QR still blocked)');
       }, 2500);
     }
+  };
+
+  // Admin Approval Action: User requested "admin ke scan karne ke baad aporve ka button ho"
+  const handleApproveEntry = async (details: {
+    id?: string;
+    name?: string;
+    roll?: string;
+    phone?: string;
+    course?: string;
+    photoUrl?: string;
+  }) => {
+    if (!details || !details.roll) return;
+    const cleanRoll = details.roll.trim().toUpperCase();
+    const cleanName = details.name || 'Student';
+    const cleanPhone = details.phone || '';
+    const cleanCourse = details.course || 'HJMC';
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+
+    const newRecord: EntryRecord = {
+      id: details.id || 'FP-' + Date.now(),
+      name: cleanName,
+      roll: cleanRoll,
+      phone: cleanPhone,
+      course: cleanCourse,
+      scannedAt: timeStr,
+      timestamp: Date.now(),
+      photoUrl: details.photoUrl,
+      approvedBy: 'Gate Admin'
+    };
+
+    // 1. Post to backend server so other devices see the approval!
+    try {
+      await fetch('/api/students/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roll: cleanRoll,
+          id: details.id,
+          approver: 'Gate Admin'
+        })
+      });
+    } catch (e) {
+      console.warn('Backend approval sync error', e);
+    }
+
+    // 2. Play celebratory sound & confetti
+    playSuccessSound();
+    triggerVibration([100, 50, 100]);
+    confetti({
+      particleCount: 50,
+      spread: 60,
+      origin: { y: 0.5 }
+    });
+
+    // 3. Update entries list
+    entriesRef.current = [newRecord, ...entriesRef.current.filter((e) => e.roll.toUpperCase() !== cleanRoll)];
+    setEntries((prev) => [newRecord, ...prev.filter((e) => e.roll.toUpperCase() !== cleanRoll)]);
+
+    // 4. Update student record locally
+    setRegisteredStudents((prev) => {
+      const match = prev[cleanRoll];
+      if (match) {
+        return {
+          ...prev,
+          [cleanRoll]: {
+            ...match,
+            admitted: true,
+            admittedAt: timeStr,
+            admittedTimestamp: Date.now()
+          }
+        };
+      }
+      return prev;
+    });
+
+    // 5. Update banner to confirmed
+    setScanBanner({
+      type: 'success',
+      message: `✅ Entry Safalta-purvak Approved! Welcome, ${cleanName}`,
+      subMessage: `Roll: ${cleanRoll} • Course: ${cleanCourse} • Admitted at ${timeStr}`,
+      details: {
+        id: details.id,
+        name: cleanName,
+        roll: cleanRoll,
+        phone: cleanPhone,
+        course: cleanCourse,
+        time: timeStr,
+        photoUrl: details.photoUrl
+      }
+    });
+    setAiBotLastAction(`Approved & Admitted: ${cleanName} (${cleanRoll})`);
   };
 
   useEffect(() => {
@@ -1139,6 +1415,8 @@ export default function App() {
           id: 'FP-REG-' + cleanRoll,
           name,
           roll: cleanRoll,
+          phone: '9876543210',
+          course: 'HJMC',
           photoUrl: defaultPhoto,
           registeredAt: Date.now()
         }
@@ -1149,6 +1427,8 @@ export default function App() {
       id: 'FP-TEST-' + Math.floor(Math.random() * 9000 + 1000),
       name,
       roll: cleanRoll,
+      phone: '9876543210',
+      course: 'HJMC',
       photo: defaultPhoto
     });
     handleQrCodeSuccess(fakePayload);
@@ -1182,9 +1462,12 @@ export default function App() {
         id: `FP-DEMO-${1000 + index}`,
         name: s.name,
         roll: s.roll,
+        phone: '9876543210',
+        course: 'HJMC',
         scannedAt: timeStr,
         timestamp: entryTimeMs,
-        photoUrl: s.photo
+        photoUrl: s.photo,
+        approvedBy: 'Gate Admin'
       };
     });
 
@@ -1196,8 +1479,11 @@ export default function App() {
           id: 'FP-REG-' + d.roll,
           name: d.name,
           roll: d.roll.toUpperCase(),
+          phone: '9876543210',
+          course: 'HJMC',
           photoUrl: d.photo,
-          registeredAt: now
+          registeredAt: now,
+          admitted: true
         };
       });
       return updated;
@@ -1281,17 +1567,76 @@ export default function App() {
           </p>
 
           <p className="mt-2 text-sm sm:text-base text-slate-400 max-w-md mx-auto">
-            {isAdmin ? (
+            {currentView === 'owner' ? (
               <span className="text-amber-300 font-medium flex items-center justify-center gap-1.5">
+                <Crown className="w-4 h-4 text-amber-400" /> 👑 Owner Portal • Master Records &amp; Attendance
+              </span>
+            ) : currentView === 'admin' ? (
+              <span className="text-purple-300 font-medium flex items-center justify-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" /> Organizer &amp; Gate Entry Admin Panel
               </span>
             ) : (
-              'Apna naam aur roll number daal kar register karo'
+              'Apna naam, roll number, aur phone daal kar pass generate karo'
             )}
           </p>
 
+          {/* Top 3-Mode Navigation Switcher */}
+          <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
+            <button
+              onClick={() => setCurrentView('student')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                currentView === 'student'
+                  ? 'bg-pink-600 text-white shadow-lg shadow-pink-500/30'
+                  : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800 border border-slate-700'
+              }`}
+            >
+              <Ticket className="w-3.5 h-3.5" />
+              <span>Student Pass (रजिस्ट्रेशन)</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (isAdmin) {
+                  setCurrentView('admin');
+                } else {
+                  setShowPinModal(true);
+                  setPinInput('');
+                  setPinError('');
+                }
+              }}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                currentView === 'admin'
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/30'
+                  : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800 border border-slate-700'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Admin Portal (7271)</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (isOwner) {
+                  setCurrentView('owner');
+                } else {
+                  setShowOwnerPinModal(true);
+                  setOwnerPinInput('');
+                  setOwnerPinError('');
+                }
+              }}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                currentView === 'owner'
+                  ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30'
+                  : 'bg-slate-900/80 text-amber-300 hover:bg-slate-800 border border-amber-500/40'
+              }`}
+            >
+              <Crown className="w-3.5 h-3.5 text-amber-400" />
+              <span>👑 Owner Section</span>
+            </button>
+          </div>
+
           {/* Admin Mode Indicator Banner */}
-          {isAdmin && (
+          {currentView === 'admin' && (
             <div className="mt-3 inline-flex items-center gap-3 bg-purple-950/50 border border-purple-500/40 px-3.5 py-1.5 rounded-full text-xs text-purple-200">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
               <span>Admin Logged In (Organizer Mode)</span>
@@ -1303,12 +1648,36 @@ export default function App() {
               </button>
             </div>
           )}
+
+          {/* Owner Mode Indicator Banner */}
+          {currentView === 'owner' && (
+            <div className="mt-3 inline-flex items-center gap-3 bg-amber-950/50 border border-amber-500/40 px-3.5 py-1.5 rounded-full text-xs text-amber-200">
+              <Crown className="w-3.5 h-3.5 text-amber-400" />
+              <span>👑 Owner Mode Active (Code: 9968 Verified)</span>
+              <button
+                onClick={handleOwnerLogout}
+                className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-300 px-2 py-0.5 rounded transition cursor-pointer"
+              >
+                Logout
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
       {/* MAIN CONTENT AREA */}
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 sm:py-10">
-        {!isAdmin ? (
+        {currentView === 'owner' ? (
+          /* ========================================================= */
+          /* FLOW 0: OWNER MASTER SECTION                              */
+          /* ========================================================= */
+          <OwnerSection
+            students={Object.values(registeredStudents)}
+            onRefresh={syncWithBackend}
+            onLogout={handleOwnerLogout}
+            onPreviewPhoto={setSelectedPreviewPhoto}
+          />
+        ) : currentView === 'student' ? (
           /* ========================================================= */
           /* FLOW 1: STUDENT REGISTRATION & PASS VIEW                  */
           /* ========================================================= */
@@ -1333,7 +1702,7 @@ export default function App() {
                   </div>
                 )}
 
-                <form onSubmit={handleRegister} className="space-y-5">
+                <form onSubmit={handleRegister} className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
                       Full Name (Poora Naam)
@@ -1359,13 +1728,54 @@ export default function App() {
                         type="text"
                         value={rollNumber}
                         onChange={(e) => setRollNumber(e.target.value)}
-                        placeholder="e.g. 23BCA104 / 2024CS089"
+                        placeholder="e.g. 24HJMC089 / 24BCA104"
                         className="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent transition text-sm uppercase"
                         required
                       />
                     </div>
+                  </div>
+
+                  {/* Phone Number Field (User requested: "esme phone number add karne ka bhi option rakho registration vakt") */}
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                      Mobile / WhatsApp Number (फोन नंबर)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="tel"
+                        maxLength={10}
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+                        placeholder="e.g. 9876543210 (10 Digits)"
+                        className="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent transition text-sm font-mono"
+                        required
+                      />
+                      <Phone className="w-4 h-4 text-emerald-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
                     <p className="mt-1.5 text-[11px] text-slate-400">
-                      * Yeh roll number entry ke samay verify kiya jayega
+                      * Gate pass verification aur zaroori update ke liye
+                    </p>
+                  </div>
+
+                  {/* Course Selection (User requested: "course hjmc by default") */}
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                      Course (कोर्स - By Default HJMC)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={studentCourse}
+                        onChange={(e) => setStudentCourse(e.target.value)}
+                        placeholder="HJMC"
+                        className="w-full bg-slate-900/90 border border-purple-500/50 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent transition text-sm font-bold uppercase tracking-wide"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded text-[10px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/40">
+                        Default: HJMC
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-pink-300/80">
+                      * Hindi Journalism &amp; Mass Communication (HJMC)
                     </p>
                   </div>
 
@@ -1538,11 +1948,20 @@ export default function App() {
                     <div className="flex-1 min-w-0">
                       <span className="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Student Name</span>
                       <span className="text-lg font-bold text-white truncate block">{registeredData.name}</span>
-                      <div className="flex items-center gap-2 mt-1">
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
                         <span className="px-2 py-0.5 rounded bg-pink-500/20 text-pink-400 font-mono font-bold text-xs border border-pink-500/30">
                           {registeredData.roll}
                         </span>
-                        <span className="text-[10px] text-purple-300 font-mono">
+                        <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold text-xs border border-purple-500/30">
+                          {registeredData.course || 'HJMC'}
+                        </span>
+                        {registeredData.phone && (
+                          <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
+                            <Phone className="w-3 h-3" />
+                            {registeredData.phone}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-400 font-mono">
                           ID: {registeredData.id}
                         </span>
                       </div>
@@ -1599,54 +2018,72 @@ export default function App() {
           <div className="w-full space-y-6">
             {/* Admin Header Stats & Tab Switcher */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* Total Entry Live Counter Card */}
-              <div className="glass-card rounded-2xl p-5 border border-purple-500/30 flex items-center justify-between sm:col-span-1 shadow-lg">
+              {/* Total Entry & Registrations Counter Card */}
+              <div className="glass-card rounded-2xl p-4 sm:p-5 border border-purple-500/30 flex items-center justify-between sm:col-span-1 shadow-lg">
                 <div>
-                  <span className="text-xs uppercase tracking-wider text-slate-400 block font-medium">Total Entry</span>
+                  <span className="text-xs uppercase tracking-wider text-slate-400 block font-medium">
+                    Gate Admitted / Total Bachhe
+                  </span>
                   <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
+                    <span className="text-3xl sm:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">
                       {entries.length}
                     </span>
-                    <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" /> Live
+                    <span className="text-slate-400 text-sm font-bold">/</span>
+                    <span className="text-lg font-bold text-pink-400">
+                      {Object.keys(registeredStudents).length} Reg
                     </span>
                   </div>
+                  <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1 mt-0.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" /> All Devices Synced
+                  </span>
                 </div>
-                <div className="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300">
+                <div className="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-300 shrink-0">
                   <UserCheck className="w-6 h-6" />
                 </div>
               </div>
 
-              {/* Navigation Tabs */}
-              <div className="glass-card rounded-2xl p-2 border border-slate-800 flex items-center justify-center sm:col-span-2 gap-2">
+              {/* Navigation Tabs (Scanner, Total Registrations, Admitted List) */}
+              <div className="glass-card rounded-2xl p-1.5 border border-slate-800 flex items-center justify-center sm:col-span-2 gap-1.5 flex-wrap sm:flex-nowrap">
                 <button
                   onClick={() => setAdminTab('scanner')}
-                  className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                     adminTab === 'scanner'
                       ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                   }`}
                 >
                   <Camera className="w-4 h-4" />
-                  <span>Scanner Tab</span>
+                  <span>Scanner</span>
                 </button>
 
                 <button
-                  onClick={() => setAdminTab('entries')}
-                  className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
-                    adminTab === 'entries'
+                  onClick={() => setAdminTab('registrations')}
+                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    adminTab === 'registrations'
                       ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                   }`}
                 >
                   <Users className="w-4 h-4" />
-                  <span>Entry List Tab ({entries.length})</span>
+                  <span>Total Reg ({Object.keys(registeredStudents).length})</span>
+                </button>
+
+                <button
+                  onClick={() => setAdminTab('entries')}
+                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    adminTab === 'entries'
+                      ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Admitted ({entries.length})</span>
                 </button>
 
                 <button
                   onClick={handleAdminLogout}
                   title="Admin Logout"
-                  className="p-3 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                  className="p-2.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1658,6 +2095,25 @@ export default function App() {
               entries={entries}
               onAddSampleData={handleGenerateDemoData}
             />
+
+            {/* TAB: TOTAL REGISTRATIONS (ALL PHONES) */}
+            {adminTab === 'registrations' && (
+              <AdminRegistrationsTab
+                students={Object.values(registeredStudents)}
+                onRefresh={syncWithBackend}
+                onApproveStudent={(student) =>
+                  handleApproveEntry({
+                    id: student.id,
+                    name: student.name,
+                    roll: student.roll,
+                    phone: student.phone,
+                    course: student.course,
+                    photoUrl: student.photoUrl
+                  })
+                }
+                onPreviewPhoto={setSelectedPreviewPhoto}
+              />
+            )}
 
             {/* TAB 1: SCANNER TAB */}
             {adminTab === 'scanner' && (
@@ -1737,6 +2193,8 @@ export default function App() {
                         ? 'bg-red-950/80 border-red-500 text-red-100 shadow-lg shadow-red-950/50'
                         : scanBanner.type === 'success'
                         ? 'bg-emerald-950/80 border-emerald-500 text-emerald-100 shadow-lg shadow-emerald-950/50'
+                        : scanBanner.type === 'pending_approval'
+                        ? 'bg-gradient-to-r from-purple-950/95 via-slate-900 to-indigo-950/95 border-amber-400 text-white shadow-xl shadow-amber-500/20 ring-2 ring-amber-400/40'
                         : 'bg-amber-950/80 border-amber-500 text-amber-100 shadow-lg shadow-amber-950/50'
                     }`}
                   >
@@ -1758,6 +2216,8 @@ export default function App() {
                             className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border-2 shadow-xl ${
                               scanBanner.type === 'duplicate'
                                 ? 'border-red-400 ring-4 ring-red-500/20'
+                                : scanBanner.type === 'pending_approval'
+                                ? 'border-amber-400 ring-4 ring-amber-500/30'
                                 : 'border-emerald-400 ring-4 ring-emerald-500/20'
                             }`}
                           >
@@ -1786,7 +2246,12 @@ export default function App() {
                           </span>
                           {scanBanner.details?.photoUrl && (
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Student Photo Matched
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Photo Matched
+                            </span>
+                          )}
+                          {scanBanner.type === 'pending_approval' && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                              ⏳ Awaiting Gatekeeper Approval
                             </span>
                           )}
                           {capturedPhotoUrl && (
@@ -1806,7 +2271,13 @@ export default function App() {
                           <div className="mt-2 text-xs flex flex-wrap gap-x-4 gap-y-1 opacity-90 font-mono bg-black/20 p-2 rounded-xl border border-white/10">
                             <span>Roll: <strong className="text-pink-300">{scanBanner.details.roll}</strong></span>
                             <span>Name: <strong className="text-white">{scanBanner.details.name}</strong></span>
-                            <span>Time: {scanBanner.details.time}</span>
+                            <span>Course: <strong className="text-purple-300">{scanBanner.details.course || 'HJMC'}</strong></span>
+                            {scanBanner.details.phone && (
+                              <span>Phone: <strong className="text-emerald-300">{scanBanner.details.phone}</strong></span>
+                            )}
+                            {scanBanner.details.time && (
+                              <span>Time: {scanBanner.details.time}</span>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1820,23 +2291,54 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-[11px] text-slate-200">
-                        <span className="text-pink-300 font-semibold flex items-center gap-1.5">
-                          <Bot className="w-3.5 h-3.5 text-pink-400" />
-                          <span>🤖 AI Bot: Scan complete ho gaya hai. Repeat scan nahi hoga!</span>
-                        </span>
-                      </div>
+                    {/* APPROVAL BUTTON BAR (User requested: "admin ke scan karne ke baad aporve ka button ho") */}
+                    {scanBanner.type === 'pending_approval' && scanBanner.details ? (
+                      <div className="mt-3.5 pt-3 border-t border-amber-500/30 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-amber-500/10 p-3 rounded-xl border border-amber-500/30">
+                        <div className="text-xs text-amber-200 flex items-center gap-2">
+                          <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+                          <div>
+                            <span className="font-bold block text-white">Entry Gate Confirmation</span>
+                            <span className="text-[11px] text-amber-200">
+                              Vidyarthi ki photo aur ID verify karein, fir "Approve" button dabayein.
+                            </span>
+                          </div>
+                        </div>
 
-                      <button
-                        onClick={handleNextScan}
-                        className="px-4 py-2 rounded-xl gradient-party text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
-                      >
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>Agla Pass Scan Karein</span>
-                        <span>➔</span>
-                      </button>
-                    </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleNextScan}
+                            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleApproveEntry(scanBanner.details!)}
+                            className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/60 active:scale-95 animate-pulse"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>✅ APPROVE / ADMIT STUDENT</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-200">
+                          <span className="text-pink-300 font-semibold flex items-center gap-1.5">
+                            <Bot className="w-3.5 h-3.5 text-pink-400" />
+                            <span>🤖 AI Bot: Scan complete ho gaya hai. Repeat scan nahi hoga!</span>
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={handleNextScan}
+                          className="px-4 py-2 rounded-xl gradient-party text-white font-bold text-xs transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Agla Pass Scan Karein</span>
+                          <span>➔</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2350,26 +2852,114 @@ export default function App() {
       </footer>
 
       {/* ========================================================= */}
-      {/* FLOATING SETTINGS BUTTON (ADMIN ACCESS PIN)               */}
+      {/* FLOATING ACTION BUTTONS (ADMIN & OWNER ACCESS)             */}
       {/* ========================================================= */}
-      <div className="fixed bottom-5 right-5 z-40">
+      <div className="fixed bottom-5 right-5 z-40 flex items-center gap-2.5">
+        {/* Owner Floating Quick Button */}
+        <button
+          onClick={() => {
+            if (isOwner) {
+              setCurrentView('owner');
+            } else {
+              setShowOwnerPinModal(true);
+              setOwnerPinError('');
+              setOwnerPinInput('');
+            }
+          }}
+          title="Owner Section Access (Code: 9968)"
+          className="w-12 h-12 rounded-full bg-gradient-to-tr from-amber-600 to-amber-400 text-black border border-amber-300 shadow-xl shadow-amber-500/30 flex items-center justify-center transition active:scale-95 cursor-pointer group hover:brightness-110"
+        >
+          <Crown className="w-6 h-6 group-hover:scale-110 transition-transform duration-300" />
+        </button>
+
+        {/* Admin Floating Quick Button */}
         <button
           onClick={() => {
             if (isAdmin) {
-              // If already logged in as admin, clicking switches view
-              setIsAdmin(true);
+              setCurrentView('admin');
             } else {
               setShowPinModal(true);
               setPinError('');
               setPinInput('');
             }
           }}
-          title="Admin Access Pin (Organizer Gate Entry)"
+          title="Admin Access Pin (Organizer Gate Entry - 7271)"
           className="w-12 h-12 rounded-full bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 shadow-xl shadow-black/50 flex items-center justify-center transition active:scale-95 cursor-pointer group"
         >
-          <Settings className="w-6 h-6 group-hover:rotate-45 transition-transform duration-300" />
+          <ShieldCheck className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform duration-300" />
         </button>
       </div>
+
+      {/* ========================================================= */}
+      {/* OWNER PIN PROMPT MODAL (CODE: 9968 - CODE DIKHE NAHI)     */}
+      {/* ========================================================= */}
+      {showOwnerPinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="glass-card w-full max-w-sm rounded-3xl p-6 border border-amber-500/40 shadow-2xl relative">
+            <button
+              onClick={() => setShowOwnerPinModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-amber-500/20">
+                <Crown className="w-6 h-6 text-amber-400" />
+              </div>
+              <h3 className="text-lg font-bold text-white">Owner Master Code Daalein</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Keval College / Event Owner ke liye • Code hidden rahega
+              </p>
+            </div>
+
+            {ownerPinError && (
+              <div className="mb-4 p-2.5 rounded-xl bg-red-950/70 border border-red-500/50 text-red-300 text-xs text-center font-bold animate-shake">
+                ⚠️ {ownerPinError}
+              </div>
+            )}
+
+            <form onSubmit={handleOwnerPinSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-amber-300/90 mb-1.5 text-center">
+                  Secret Code (Code dikhe nahi - Password Masked):
+                </label>
+                <div className="relative">
+                  <input
+                    type="password"
+                    maxLength={6}
+                    autoFocus
+                    value={ownerPinInput}
+                    onChange={handleOwnerCodeChange}
+                    placeholder="••••"
+                    className="w-full text-center tracking-widest text-3xl font-mono bg-slate-900 border border-amber-500/50 rounded-xl py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                  <Lock className="w-4 h-4 text-amber-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+                <span className="block text-[11px] text-amber-300/80 text-center mt-2 font-medium">
+                  💡 9968 code daalte hi auto-login ho jayega
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowOwnerPinModal(false)}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-750 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold text-black bg-amber-500 hover:bg-amber-400 shadow-md transition cursor-pointer"
+                >
+                  Owner Login
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================= */}
       {/* ADMIN PIN PROMPT MODAL (PIN: 7271)                        */}
