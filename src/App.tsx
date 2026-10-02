@@ -54,7 +54,9 @@ import {
   MessageSquare,
   Smartphone,
   Send,
-  SendHorizontal
+  SendHorizontal,
+  Mail,
+  CheckCheck
 } from 'lucide-react';
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
 import { OwnerSection, StudentRecord } from './components/OwnerSection.tsx';
@@ -111,6 +113,7 @@ export interface RegisteredStudent {
   name: string;
   roll: string;
   phone: string;
+  email?: string;
   course: string;
   photoUrl?: string;
   registeredAt: number;
@@ -122,6 +125,9 @@ export interface RegisteredStudent {
   smsSent?: boolean;
   smsSentAt?: string;
   smsMessage?: string;
+  emailSent?: boolean;
+  emailSentAt?: string;
+  udghoshPassKey?: string;
 }
 
 export default function App() {
@@ -170,6 +176,8 @@ export default function App() {
   const [studentName, setStudentName] = useState<string>('');
   const [rollNumber, setRollNumber] = useState<string>('');
   const [phoneNumber, setPhoneNumber] = useState<string>('');
+  const [studentEmail, setStudentEmail] = useState<string>('');
+  const [showEmailLetterModal, setShowEmailLetterModal] = useState<boolean>(false);
   const [studentCourse, setStudentCourse] = useState<string>('HJMC'); // Default HJMC as requested
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
   const [photoUploadError, setPhotoUploadError] = useState<string>('');
@@ -182,9 +190,11 @@ export default function App() {
     name: string;
     roll: string;
     phone: string;
+    email?: string;
     course: string;
     photoUrl?: string;
     qrUrl: string;
+    udghoshPassKey?: string;
   } | null>(null);
   const [isGeneratingPass, setIsGeneratingPass] = useState<boolean>(false);
   const [formError, setFormError] = useState<string>('');
@@ -192,6 +202,9 @@ export default function App() {
     show: boolean;
     message: string;
     sms?: SmsRecord;
+    email?: string;
+    emailSent?: boolean;
+    udghoshPassKey?: string;
   } | null>(null);
 
   // Registered students map with photos for fast lookup by roll
@@ -771,15 +784,29 @@ export default function App() {
       return;
     }
 
+    const cleanEmail = studentEmail.trim().toLowerCase();
+    if (!cleanEmail) {
+      setFormError('Kripya apna Email Address dalein (_@udghosh 2026 pass bhejne ke liye anivarya).');
+      return;
+    }
+    if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setFormError('Kripya sahi Email Address dalein (e.g. student@gmail.com).');
+      return;
+    }
+
     setIsGeneratingPass(true);
     try {
       const uniqueId = 'FP-HJMC-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(Math.random() * 899 + 100);
+      const udghoshPassKey = `${cleanRoll}_@udghosh 2026`;
+
       const payload = {
         name: cleanName,
         roll: cleanRoll,
         phone: cleanPhone,
+        email: cleanEmail,
         course: cleanCourse,
-        id: uniqueId
+        id: uniqueId,
+        passKey: udghoshPassKey
       };
 
       // Save to registered students registry (mapping by roll number)
@@ -788,13 +815,15 @@ export default function App() {
         name: cleanName,
         roll: cleanRoll,
         phone: cleanPhone,
+        email: cleanEmail,
         course: cleanCourse,
         photoUrl: studentPhoto || undefined,
         registeredAt: Date.now(),
-        admitted: false
+        admitted: false,
+        udghoshPassKey
       };
 
-      // Save to central server so ALL devices see the student and photo!
+      // Save to central server so ALL devices see the student, email, and photo!
       try {
         await fetch('/api/students', {
           method: 'POST',
@@ -805,7 +834,7 @@ export default function App() {
         console.warn('Backend server save error', err);
       }
 
-      // AUTOMATIC SMS DISPATCH ON REGISTRATION:
+      // AUTOMATIC SMS & EMAIL DISPATCH ON REGISTRATION:
       // Direct call to /api/send-sms route as requested by user
       try {
         const smsResponse = await fetch('/api/send-sms', {
@@ -814,6 +843,7 @@ export default function App() {
           body: JSON.stringify({
             phoneNumber: cleanPhone,
             phone: cleanPhone,
+            email: cleanEmail,
             studentName: cleanName,
             roll: cleanRoll,
             course: cleanCourse
@@ -828,7 +858,7 @@ export default function App() {
             studentName: cleanName,
             phone: cleanPhone,
             sender: 'udghosh_hjmc_swagtam_by_Aditya',
-            message: `🔐 [UDGHOSH REGISTRATION CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। धन्यवाद!`,
+            message: `🔐 [UDGHOSH 2026 CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। Pass Code: ${udghoshPassKey}। आपके ईमेल ${cleanEmail} पर भी पास भेज दिया गया है।`,
             sentAt: 'Just Now',
             timestamp: Date.now(),
             status: 'DELIVERED'
@@ -836,13 +866,16 @@ export default function App() {
           setSmsList((prev) => [sentRecord, ...prev.filter((s) => s.id !== sentRecord.id)]);
           setRegistrationAlert({
             show: true,
-            message: smsData.message || 'रजिस्ट्रेशन सफल और SMS भेज दिया गया है!',
-            sms: sentRecord
+            message: `रजिस्ट्रेशन सफल! ईमेल (${cleanEmail}) पर ${udghoshPassKey} और फोन (+91 ${cleanPhone}) पर SMS भेज दिया गया है!`,
+            sms: sentRecord,
+            email: cleanEmail,
+            emailSent: true,
+            udghoshPassKey
           });
           setIncomingSmsToast(sentRecord);
         }
       } catch (smsErr) {
-        console.warn('Auto SMS trigger error', smsErr);
+        console.warn('Auto SMS/Email trigger error', smsErr);
       }
 
       setRegisteredStudents((prev) => ({
@@ -865,9 +898,11 @@ export default function App() {
         name: cleanName,
         roll: cleanRoll,
         phone: cleanPhone,
+        email: cleanEmail,
         course: cleanCourse,
         photoUrl: studentPhoto || undefined,
-        qrUrl: qrDataUrl
+        qrUrl: qrDataUrl,
+        udghoshPassKey
       });
 
       // Confetti celebration
@@ -890,6 +925,8 @@ export default function App() {
     setStudentName('');
     setRollNumber('');
     setPhoneNumber('');
+    setStudentEmail('');
+    setShowEmailLetterModal(false);
     setStudentCourse('HJMC');
     setStudentPhoto(null);
     setPhotoUploadError('');
@@ -2159,6 +2196,33 @@ export default function App() {
                     </p>
                   </div>
 
+                  {/* Student Email Address Field (User requested: "registration karne par email bhi dalna pare or email par uska _@udghosh 2026 automatic chala jaaye or same sms bhi chala jaaye") */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
+                        Student Email Address (ईमेल आईडी) *
+                      </label>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-pink-500/20 text-pink-300 border border-pink-500/40">
+                        _@udghosh 2026 Automatic
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        id="email-input"
+                        type="email"
+                        value={studentEmail}
+                        onChange={(e) => setStudentEmail(e.target.value)}
+                        placeholder="e.g. rahul.sharma@gmail.com"
+                        className="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent transition text-sm"
+                        required
+                      />
+                      <Mail className="w-4 h-4 text-pink-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-emerald-400">
+                      * Is email par aapka official pass code <strong className="font-mono text-cyan-300">_@udghosh 2026</strong> automatic chala jayega
+                    </p>
+                  </div>
+
                   {/* Course Selection (User requested: "course hjmc by default") */}
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
@@ -2338,12 +2402,33 @@ export default function App() {
                           <span className="font-extrabold text-white text-sm sm:text-base block">
                             {registrationAlert.message}
                           </span>
-                          <span className="text-[11px] text-emerald-300 font-mono block mt-0.5">
-                            📲 SMS Sender: <strong>udghosh_hjmc_swagtam_by_Aditya</strong> • To: +91 {registeredData?.phone}
-                          </span>
+                          <div className="flex items-center gap-3 flex-wrap mt-1 text-[11px] font-mono">
+                            <span className="text-emerald-300">
+                              📲 SMS Sent: +91 {registeredData?.phone}
+                            </span>
+                            {registeredData?.email && (
+                              <span className="text-pink-300 flex items-center gap-1">
+                                <Mail className="w-3 h-3 text-pink-400" />
+                                Email: <strong>{registeredData.email}</strong>
+                              </span>
+                            )}
+                            <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40">
+                              🔑 {registeredData?.udghoshPassKey || `${registeredData?.roll}_@udghosh 2026`}
+                            </span>
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
+                        {registeredData?.email && (
+                          <button
+                            type="button"
+                            onClick={() => setShowEmailLetterModal(true)}
+                            className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold transition shadow cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                            <span>_@udghosh Email Dekhein</span>
+                          </button>
+                        )}
                         {registrationAlert.sms && (
                           <button
                             type="button"
@@ -2356,7 +2441,7 @@ export default function App() {
                         )}
                         <a
                           href={`https://wa.me/91${registeredData?.phone}?text=${encodeURIComponent(
-                            `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${registeredData?.name}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। आपका Entry Pass QR Code जनरेट हो चुका है।\n\n🎫 *Roll No:* ${registeredData?.roll}\n📚 *Course:* ${registeredData?.course || 'HJMC'}\n📞 *Phone:* ${registeredData?.phone}\n🆔 *Pass ID:* ${registeredData?.id}\n🛡️ *Pass Status:* ACTIVE (Single-Use Entry Pass)\n\n📌 *Zaroori Soochana:*\n• Entry Gate par ye digital pass dikhana anivarya hai.\n• Gate par scan hote hi pass expire ho jayega. Single-use only!\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`
+                            `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${registeredData?.name}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा।\n\n🎫 *Pass Code:* ${registeredData?.udghoshPassKey || `${registeredData?.roll}_@udghosh 2026`}\n📚 *Course:* ${registeredData?.course || 'HJMC'}\n📞 *Phone:* ${registeredData?.phone}\n${registeredData?.email ? `📧 *Email:* ${registeredData.email}\n` : ''}🆔 *Pass ID:* ${registeredData?.id}\n🛡️ *Pass Status:* ACTIVE (Single-Use Entry Pass)\n\n📌 *Zaroori Soochana:*\n• Entry Gate par ye digital pass dikhana anivarya hai.\n• Gate par scan hote hi pass expire ho jayega. Single-use only!\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`
                           )}`}
                           target="_blank"
                           rel="noreferrer"
@@ -2452,6 +2537,15 @@ export default function App() {
                                 {registeredData.phone}
                               </span>
                             )}
+                            {registeredData.email && (
+                              <span className="text-[11px] text-pink-300 font-mono flex items-center gap-1">
+                                <Mail className="w-3 h-3 text-pink-400" />
+                                {registeredData.email}
+                              </span>
+                            )}
+                            <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono font-extrabold text-xs border border-cyan-500/40">
+                              🔑 Pass Key: {registeredData.udghoshPassKey || `${registeredData.roll}_@udghosh 2026`}
+                            </span>
                             <span className="text-[10px] text-slate-400 font-mono">
                               ID: {registeredData.id}
                             </span>
@@ -2512,6 +2606,16 @@ export default function App() {
                             : `Gate par scan hote hi aapke mobile (+91 ${registeredData.phone}) par "udghosh_hjmc_swagtam_by_Aditya" naam se portal OTP style SMS aayega aur pass expire ho jayega.`}
                         </p>
                         <div className="pt-1.5 flex items-center gap-2 flex-wrap">
+                          {registeredData.email && (
+                            <button
+                              type="button"
+                              onClick={() => setShowEmailLetterModal(true)}
+                              className="px-2.5 py-1 rounded-lg bg-pink-600/30 hover:bg-pink-600/50 text-pink-200 border border-pink-500/40 text-[10px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+                            >
+                              <Mail className="w-3.5 h-3.5 text-pink-300" />
+                              <span>📧 _@udghosh Email Letter</span>
+                            </button>
+                          )}
                           {matchingSms && (
                             <button
                               type="button"

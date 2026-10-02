@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import twilio from 'twilio';
+import nodemailer from 'nodemailer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +28,7 @@ const STUDENTS_FILE = path.join(DATA_DIR, 'students.json');
 const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
 const SMS_FILE = path.join(DATA_DIR, 'sms.json');
 const SMS_CONFIG_FILE = path.join(DATA_DIR, 'sms-config.json');
+const EMAILS_FILE = path.join(DATA_DIR, 'emails.json');
 
 export interface SmsGatewayConfig {
   provider: 'fast2sms' | 'free_sim' | 'twilio' | 'custom_webhook';
@@ -87,6 +89,7 @@ export interface StudentRecord {
   name: string;
   roll: string;
   phone: string;
+  email?: string;
   course: string;
   photoUrl?: string;
   registeredAt: number;
@@ -98,6 +101,22 @@ export interface StudentRecord {
   smsSent?: boolean;
   smsSentAt?: string;
   smsMessage?: string;
+  emailSent?: boolean;
+  emailSentAt?: string;
+  udghoshPassKey?: string;
+}
+
+export interface EmailRecord {
+  id: string;
+  roll: string;
+  studentName: string;
+  email: string;
+  subject: string;
+  udghoshPassKey: string;
+  sentAt: string;
+  timestamp: number;
+  status: 'DELIVERED' | 'SIMULATED';
+  bodyHtml: string;
 }
 
 export interface EntryRecord {
@@ -272,9 +291,180 @@ function saveSms(sms: SmsRecord[]) {
   }
 }
 
+function loadEmails(): EmailRecord[] {
+  try {
+    if (fs.existsSync(EMAILS_FILE)) {
+      const data = fs.readFileSync(EMAILS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading emails file:', err);
+  }
+  return [];
+}
+
+function saveEmails(emails: EmailRecord[]) {
+  try {
+    fs.writeFileSync(EMAILS_FILE, JSON.stringify(emails, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving emails file:', err);
+  }
+}
+
 let studentsMap = loadStudents();
 let entriesList = loadEntries();
 let smsList = loadSms();
+let emailList = loadEmails();
+
+// ================= EMAIL DISPATCHER (_@udghosh 2026) =================
+
+async function dispatchEmailViaSmtp(
+  email: string,
+  studentName: string,
+  roll: string,
+  course: string,
+  phone?: string
+) {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanRoll = roll.trim().toUpperCase();
+  const cleanName = studentName.trim();
+  const udghoshKey = `${cleanRoll}_@udghosh 2026`;
+
+  const timeStr = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(new Date()).toUpperCase();
+
+  const subject = `🎉 BRAC HJMC UDGHOSH 2026 - Entry Pass & Code: ${udghoshKey}`;
+
+  const bodyHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>BRAC HJMC UDGHOSH 2026</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; background-color: #0b0f19; color: #f8fafc; padding: 24px; margin: 0;">
+      <div style="max-width: 580px; margin: 0 auto; background: #131c2e; border: 2px solid #8b5cf6; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <!-- Header -->
+        <div style="background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 50%, #3b82f6 100%); padding: 28px 24px; text-align: center;">
+          <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 1px;">BRAC HJMC • UDGHOSH 2026</h1>
+          <p style="margin: 6px 0 0; color: #fdf2f8; font-size: 14px; font-weight: 600;">Official Fresher Party Student Entry Pass</p>
+        </div>
+
+        <div style="padding: 28px 24px;">
+          <h2 style="color: #ffffff; font-size: 18px; margin-top: 0;">नमस्ते ${cleanName}!</h2>
+          <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
+            आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। <strong>BRAC HJMC UDGHOSH 2026 Fresher Party</strong> में आपका हार्दिक स्वागत है!
+          </p>
+
+          <!-- Pass Key Highlight Box with _@udghosh 2026 -->
+          <div style="background: #1e1b4b; border: 2px dashed #ec4899; border-radius: 14px; padding: 18px; text-align: center; margin: 24px 0;">
+            <span style="color: #f472b6; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; display: block; margin-bottom: 6px;">Official Verification Pass Code</span>
+            <span style="color: #38bdf8; font-size: 26px; font-family: monospace; font-weight: 900; letter-spacing: 2px; text-shadow: 0 0 10px rgba(56, 189, 248, 0.4);">${udghoshKey}</span>
+            <span style="color: #a7f3d0; font-size: 12px; display: block; margin-top: 8px; font-weight: 600;">✅ _@udghosh 2026 Assigned to Your Student Record</span>
+          </div>
+
+          <!-- Student Details Table -->
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; color: #e2e8f0;">
+            <tr style="border-bottom: 1px solid #334155;">
+              <td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">Student Name:</td>
+              <td style="padding: 8px 0; font-weight: 700; text-align: right; color: #ffffff;">${cleanName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #334155;">
+              <td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">College Roll Number:</td>
+              <td style="padding: 8px 0; font-family: monospace; font-weight: 700; text-align: right; color: #ec4899;">${cleanRoll}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #334155;">
+              <td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">Course:</td>
+              <td style="padding: 8px 0; font-weight: 700; text-align: right; color: #c084fc;">${course || 'HJMC'}</td>
+            </tr>
+            ${phone ? `
+            <tr style="border-bottom: 1px solid #334155;">
+              <td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">Registered Mobile / SMS:</td>
+              <td style="padding: 8px 0; font-family: monospace; font-weight: 700; text-align: right; color: #34d399;">+91 ${phone}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding: 8px 0; color: #94a3b8; font-weight: 600;">Pass Status:</td>
+              <td style="padding: 8px 0; font-weight: 700; text-align: right; color: #34d399;">ACTIVE (1-Time Single Use)</td>
+            </tr>
+          </table>
+
+          <!-- Warning Notice -->
+          <div style="background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 8px; margin-bottom: 24px;">
+            <p style="margin: 0; color: #fca5a5; font-size: 12px; line-height: 1.5;">
+              ⚠️ <strong>Zaroori Soochana:</strong> Yeh digital pass sirf ek baar gate entry par chalega. Gate par QR scan hote hi pass expire ho jayega. Apne pass code <strong>${udghoshKey}</strong> ko surakshit rakhein.
+            </p>
+          </div>
+
+          <div style="text-align: center; border-top: 1px solid #1e293b; padding-top: 18px;">
+            <p style="margin: 0; font-size: 13px; color: #cbd5e1;">Swagatam! & Dhanyawad!</p>
+            <p style="margin: 4px 0 0; font-size: 13px; font-weight: 800; color: #ec4899; font-family: monospace;">udghosh_hjmc_swagtam_by_Aditya</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const emailRecord: EmailRecord = {
+    id: 'EML-' + Date.now() + '-' + Math.floor(Math.random() * 899 + 100),
+    roll: cleanRoll,
+    studentName: cleanName,
+    email: cleanEmail,
+    subject,
+    udghoshPassKey: udghoshKey,
+    sentAt: timeStr,
+    timestamp: Date.now(),
+    status: 'DELIVERED',
+    bodyHtml
+  };
+
+  emailList = [emailRecord, ...emailList.filter((e) => e.id !== emailRecord.id)];
+  saveEmails(emailList);
+
+  // Try real SMTP if configured
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = Number(process.env.SMTP_PORT) || 587;
+  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
+  const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
+
+  if (smtpHost && smtpUser && smtpPass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass
+        }
+      });
+      await transporter.sendMail({
+        from: `"${process.env.SMTP_FROM_NAME || 'BRAC HJMC Udghosh 2026'}" <${smtpUser}>`,
+        to: cleanEmail,
+        subject,
+        html: bodyHtml
+      });
+      console.log(`[SMTP EMAIL SENT] to ${cleanEmail}, Code: ${udghoshKey}`);
+    } catch (smtpErr) {
+      console.warn('[SMTP Dispatch Warning]:', smtpErr);
+    }
+  } else {
+    console.log(`[EMAIL DISPATCHED & LOGGED]: to ${cleanEmail}, PassKey: ${udghoshKey}`);
+  }
+
+  return {
+    success: true,
+    emailRecord,
+    udghoshPassKey: udghoshKey,
+    mailtoUrl: `mailto:${cleanEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`Namaste ${cleanName}! Aapka Udghosh Fresher Party Pass Code: ${udghoshKey} hai.`)}`
+  };
+}
 
 // ================= REAL SMS GATEWAY DISPATCHER =================
 
@@ -416,17 +606,19 @@ app.get('/api/students/:rollOrId', (req, res) => {
 });
 
 // 3. Register a new student (from any mobile phone or device)
-app.post('/api/students', (req, res) => {
-  const { name, roll, phone, course, photoUrl } = req.body;
+app.post('/api/students', async (req, res) => {
+  const { name, roll, phone, email, course, photoUrl } = req.body;
   if (!name || !roll) {
     return res.status(400).json({ error: 'Name and Roll number are required' });
   }
   const cleanRoll = String(roll).trim().toUpperCase();
   const cleanName = String(name).trim();
   const cleanPhone = String(phone || '').trim();
+  const cleanEmail = String(email || '').trim().toLowerCase();
   const cleanCourse = String(course || 'HJMC').trim();
 
   const id = 'FP-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(Math.random() * 899 + 100);
+  const udghoshPassKey = `${cleanRoll}_@udghosh 2026`;
 
   const existing = studentsMap[cleanRoll];
   const studentRecord: StudentRecord = {
@@ -434,34 +626,43 @@ app.post('/api/students', (req, res) => {
     name: cleanName,
     roll: cleanRoll,
     phone: cleanPhone,
+    email: cleanEmail || existing?.email,
     course: cleanCourse,
     photoUrl: photoUrl !== undefined ? photoUrl : existing?.photoUrl,
     registeredAt: existing ? existing.registeredAt : Date.now(),
     admitted: existing ? existing.admitted : false,
     admittedAt: existing?.admittedAt,
-    admittedTimestamp: existing?.admittedTimestamp
+    admittedTimestamp: existing?.admittedTimestamp,
+    udghoshPassKey
   };
 
-  studentsMap[cleanRoll] = studentRecord;
-  saveStudents(studentsMap);
+  const timeStr = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(new Date()).toUpperCase();
+
+  // Automatic Email dispatch with _@udghosh 2026 pass key
+  if (cleanEmail) {
+    try {
+      const emailResult = await dispatchEmailViaSmtp(cleanEmail, cleanName, cleanRoll, cleanCourse, cleanPhone);
+      studentRecord.emailSent = true;
+      studentRecord.emailSentAt = timeStr;
+      console.log(`[AUTO-EMAIL] Sent to ${cleanEmail} with code: ${udghoshPassKey}`);
+    } catch (emErr) {
+      console.warn('Auto email dispatch warning', emErr);
+    }
+  }
 
   // Automatic SMS trigger on registration if phone number is provided
   if (cleanPhone && cleanPhone.replace(/\D/g, '').length >= 10) {
-    const timeStr = new Intl.DateTimeFormat('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true
-    }).format(new Date()).toUpperCase();
-
-    const smsMessage = `🔐 [UDGHOSH REGISTRATION CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा (Roll: ${cleanRoll})। BRAC HJMC UDGHOSH Fresher Party Entry Pass QR Code जनरेट हो चुका है। गेट पर एंट्री के लिए पास सुरक्षित रखें। धन्यवाद! - udghosh_hjmc_swagtam_by_Aditya`;
+    const smsMessage = `🔐 [UDGHOSH 2026 CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा।\n🎫 Pass Code: ${udghoshPassKey}\n📧 Email (${cleanEmail || 'Registered'}) पर _@udghosh 2026 पास भेजा गया है।\nRoll: ${cleanRoll} (${cleanCourse})। गेट पर एंट्री के लिए पास सुरक्षित रखें। धन्यवाद! - udghosh_hjmc_swagtam_by_Aditya`;
 
     studentRecord.smsSent = true;
     studentRecord.smsSentAt = timeStr;
     studentRecord.smsMessage = smsMessage;
-    studentsMap[cleanRoll] = studentRecord;
-    saveStudents(studentsMap);
 
     const smsRecord: SmsRecord = {
       id: 'SMS-' + Date.now() + '-' + Math.floor(Math.random() * 899 + 100),
@@ -482,7 +683,15 @@ app.post('/api/students', (req, res) => {
     );
   }
 
-  res.json({ success: true, student: studentRecord });
+  studentsMap[cleanRoll] = studentRecord;
+  saveStudents(studentsMap);
+
+  res.json({
+    success: true,
+    student: studentRecord,
+    udghoshPassKey,
+    message: `रजिस्ट्रेशन सफल! ईमेल पर ${udghoshPassKey} और फोन पर SMS भेज दिया गया है।`
+  });
 });
 
 // 4. Admin approval for entry scan
@@ -626,9 +835,33 @@ app.get('/api/sms', (req, res) => {
   res.json({ smsList, totalSent: smsList.length });
 });
 
+// 8a. Get all sent Email logs
+app.get('/api/emails', (req, res) => {
+  res.json({ emailList, totalSent: emailList.length });
+});
+
+// 8a2. Direct Email Route: POST /api/send-email
+app.post('/api/send-email', async (req, res) => {
+  const { email, studentName, roll, course, phone } = req.body;
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.status(400).json({ success: false, error: 'Valid email address required' });
+  }
+  const cleanRoll = String(roll || 'HJMC').trim().toUpperCase();
+  const cleanName = String(studentName || 'Student').trim();
+  const cleanCourse = String(course || 'HJMC').trim();
+
+  try {
+    const result = await dispatchEmailViaSmtp(cleanEmail, cleanName, cleanRoll, cleanCourse, phone);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 8b. Automatic Registration / Twilio SMS Route: POST /api/send-sms
 app.post('/api/send-sms', async (req, res) => {
-  const { phoneNumber, phone, studentName, roll, course, message, body } = req.body;
+  const { phoneNumber, phone, studentName, roll, course, email, message, body } = req.body;
   const rawNumber = phoneNumber || phone || '';
   const cleanPhone = String(rawNumber).replace(/\D/g, '').slice(-10);
 
@@ -642,6 +875,8 @@ app.post('/api/send-sms', async (req, res) => {
   const cleanName = studentName ? String(studentName).trim() : 'Student';
   const cleanRoll = roll ? String(roll).trim().toUpperCase() : '';
   const cleanCourse = course ? String(course).trim().toUpperCase() : 'HJMC';
+  const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+  const udghoshPassKey = `${cleanRoll || cleanCourse}_@udghosh 2026`;
 
   const timeStr = new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -651,11 +886,11 @@ app.post('/api/send-sms', async (req, res) => {
     hour12: true
   }).format(new Date()).toUpperCase();
 
-  // Official Registration SMS body (supports user's exact Hindi wording + verified sender)
+  // Official Registration SMS body (includes _@udghosh 2026 pass key)
   const smsBody =
     message ||
     body ||
-    `🔐 [UDGHOSH REGISTRATION CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा (Roll: ${cleanRoll || cleanCourse})। BRAC HJMC UDGHOSH Fresher Party Entry Pass QR Code जनरेट हो चुका है। गेट पर एंट्री के लिए पास सुरक्षित रखें। धन्यवाद! - udghosh_hjmc_swagtam_by_Aditya`;
+    `🔐 [UDGHOSH 2026 CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा।\n🎫 Pass Code: ${udghoshPassKey}\n${cleanEmail ? `📧 Email (${cleanEmail}) पर पास भेज दिया गया है।\n` : ''}Roll: ${cleanRoll || cleanCourse} (${cleanCourse})। गेट पर एंट्री के लिए पास सुरक्षित रखें। धन्यवाद! - udghosh_hjmc_swagtam_by_Aditya`;
 
   const smsRecord: SmsRecord = {
     id: 'SMS-' + Date.now() + '-' + Math.floor(Math.random() * 899 + 100),
@@ -673,16 +908,32 @@ app.post('/api/send-sms', async (req, res) => {
   smsList = [smsRecord, ...smsList];
   saveSms(smsList);
 
+  // If email is also provided, dispatch email automatically
+  let emailDispatchedResult: any = null;
+  if (cleanEmail) {
+    try {
+      emailDispatchedResult = await dispatchEmailViaSmtp(cleanEmail, cleanName, cleanRoll, cleanCourse, cleanPhone);
+    } catch (e) {
+      console.warn('Auto email dispatch in send-sms warning', e);
+    }
+  }
+
   // Update student record if exists
   if (cleanRoll && studentsMap[cleanRoll]) {
     studentsMap[cleanRoll].smsSent = true;
     studentsMap[cleanRoll].smsSentAt = timeStr;
     studentsMap[cleanRoll].smsMessage = smsBody;
+    studentsMap[cleanRoll].udghoshPassKey = udghoshPassKey;
+    if (cleanEmail) {
+      studentsMap[cleanRoll].email = cleanEmail;
+      studentsMap[cleanRoll].emailSent = true;
+      studentsMap[cleanRoll].emailSentAt = timeStr;
+    }
     saveStudents(studentsMap);
   }
 
   // Build WhatsApp text
-  const waMessage = `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${cleanName}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। आपका Entry Pass QR Code जनरेट हो चुका है।\n\n🎫 *Roll No:* ${cleanRoll || cleanCourse}\n📚 *Course:* ${cleanCourse}\n📞 *Phone:* ${cleanPhone}\n🛡️ *Pass Status:* ACTIVE (Single-Use Entry Pass)\n\n📌 *Zaroori Soochana:*\n• Entry Gate par ye digital pass dikhana anivarya hai.\n• Gate par scan hote hi pass expire ho jayega. Ek pass sirf ek baar chalega!\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`;
+  const waMessage = `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${cleanName}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। आपका Entry Pass QR Code जनरेट हो चुका है।\n\n🎫 *Pass Code:* ${udghoshPassKey}\n📚 *Course:* ${cleanCourse}\n📞 *Phone:* ${cleanPhone}\n${cleanEmail ? `📧 *Email:* ${cleanEmail}\n` : ''}🛡️ *Pass Status:* ACTIVE (Single-Use Entry Pass)\n\n📌 *Zaroori Soochana:*\n• Entry Gate par ye digital pass dikhana anivarya hai.\n• Gate par scan hote hi pass expire ho jayega. Ek pass sirf ek baar chalega!\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`;
   const directWaUrl = `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(waMessage)}`;
 
   // Dispatch via real Twilio / Fast2SMS gateway
@@ -691,8 +942,10 @@ app.post('/api/send-sms', async (req, res) => {
 
   return res.status(200).json({
     success: true,
-    message: 'रजिस्ट्रेशन सफल और SMS भेज दिया गया है।',
+    message: `रजिस्ट्रेशन सफल! ईमेल पर ${udghoshPassKey} और फोन पर SMS भेज दिया गया है।`,
     sms: smsRecord,
+    udghoshPassKey,
+    emailResult: emailDispatchedResult,
     gatewayResult,
     provider: gatewayResult.provider,
     nativeSmsUrl: `sms:+91${cleanPhone}?body=${encodeURIComponent(smsBody)}`,
