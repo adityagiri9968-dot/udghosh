@@ -44,12 +44,16 @@ import {
   GraduationCap,
   Eye,
   EyeOff,
-  Lock
+  Lock,
+  Battery,
+  BatteryCharging,
+  BatteryLow,
+  Calendar
 } from 'lucide-react';
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
 import { OwnerSection, StudentRecord } from './components/OwnerSection.tsx';
 import { AdminRegistrationsTab } from './components/AdminRegistrationsTab.tsx';
-import { formatScanTime } from './utils/timeFormat.ts';
+import { formatScanTime, formatIndianDateTime, formatTimeInHindiWords } from './utils/timeFormat.ts';
 
 export interface EntryRecord {
   id: string;
@@ -77,6 +81,11 @@ interface ScanBannerState {
     photoUrl?: string;
     alreadyAdmitted?: boolean;
     admittedAt?: string;
+    isPreRegistered?: boolean;
+    registeredAt?: number;
+    registeredAtFormatted?: string;
+    firstScanTimeFormatted?: string;
+    firstScanTimeHindi?: string;
   };
 }
 
@@ -218,6 +227,74 @@ export default function App() {
   const [cameraError, setCameraError] = useState<string>('');
   const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // 🔋 Battery Status API & Battery-Saving Mode State
+  const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
+  const [isBatteryCharging, setIsBatteryCharging] = useState<boolean>(false);
+  const [isBatterySupported, setIsBatterySupported] = useState<boolean>(false);
+  const [batterySaverOverride, setBatterySaverOverride] = useState<boolean | null>(() => {
+    try {
+      const saved = localStorage.getItem('fresher_party_battery_saver');
+      return saved !== null ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Low battery condition: level <= 20% and not currently charging
+  const isBatteryLow = batteryLevel !== null && batteryLevel <= 20 && !isBatteryCharging;
+  // Active if manually overridden to true OR if battery level is low
+  const isBatterySaverActive = batterySaverOverride !== null ? batterySaverOverride : isBatteryLow;
+  const isBatterySaverActiveRef = useRef<boolean>(isBatterySaverActive);
+
+  useEffect(() => {
+    isBatterySaverActiveRef.current = isBatterySaverActive;
+  }, [isBatterySaverActive]);
+
+  const toggleBatterySaver = () => {
+    const nextVal = !isBatterySaverActive;
+    setBatterySaverOverride(nextVal);
+    try {
+      localStorage.setItem('fresher_party_battery_saver', JSON.stringify(nextVal));
+    } catch {}
+  };
+
+  // Battery Status API Event Listeners
+  useEffect(() => {
+    let batteryObj: any = null;
+    let handleLevelChange: (() => void) | null = null;
+    let handleChargingChange: (() => void) | null = null;
+
+    const onBatteryUpdate = (b: any) => {
+      const lvl = Math.round(b.level * 100);
+      setBatteryLevel(lvl);
+      setIsBatteryCharging(Boolean(b.charging));
+    };
+
+    if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
+      setIsBatterySupported(true);
+      (navigator as any)
+        .getBattery()
+        .then((b: any) => {
+          batteryObj = b;
+          onBatteryUpdate(b);
+          handleLevelChange = () => onBatteryUpdate(b);
+          handleChargingChange = () => onBatteryUpdate(b);
+          b.addEventListener('levelchange', handleLevelChange);
+          b.addEventListener('chargingchange', handleChargingChange);
+        })
+        .catch(() => {
+          setIsBatterySupported(false);
+        });
+    }
+
+    return () => {
+      if (batteryObj) {
+        if (handleLevelChange) batteryObj.removeEventListener('levelchange', handleLevelChange);
+        if (handleChargingChange) batteryObj.removeEventListener('chargingchange', handleChargingChange);
+      }
+    };
+  }, []);
 
   // 🤖 AI Automatic Bot (Single-Scan Auto-Guard) State
   const [aiBotMode, setAiBotMode] = useState<'single_shot' | 'smart_guard'>('single_shot');
@@ -1088,17 +1165,29 @@ export default function App() {
       const studentCourseFound = studentCourseScanned || matchedProfile?.course || existing?.course || 'HJMC';
       const studentIdFound = data.id || matchedProfile?.id || existing?.id || 'FP-' + Date.now();
 
+      // Student registration information lookup
+      const isPreRegistered = Boolean(matchedProfile);
+      const registeredTimestamp = matchedProfile?.registeredAt;
+      const registeredAtFormatted = registeredTimestamp
+        ? formatIndianDateTime(registeredTimestamp)
+        : undefined;
+
       if (existing || matchedProfile?.admitted) {
-        // DUPLICATE ENTRY
-        const prevTime = formatScanTime(
-          existing?.scannedAt || matchedProfile?.admittedAt || existing?.timestamp || matchedProfile?.admittedTimestamp
-        );
+        // DUPLICATE ENTRY - User requested: "scan ke dawran ye batye ki esne pahle hi registration kiyea tha or real time ki kab kiya tha or pahli baar scan kitne bajakar jitne mint par huaa tha"
+        const firstScanRaw =
+          existing?.scannedAt ||
+          matchedProfile?.admittedAt ||
+          existing?.timestamp ||
+          matchedProfile?.admittedTimestamp;
+        const prevTime = formatScanTime(firstScanRaw);
+        const firstScanHindi = formatTimeInHindiWords(firstScanRaw);
+
         playDuplicateWarningSound();
         triggerVibration([300, 100, 300]);
         setScanBanner({
           type: 'duplicate',
           message: '⚠️ Pehle hi entry ho chuki hai!',
-          subMessage: `(Pehle Admitted: ${prevTime}) • 🤖 AI Bot duplicate guard`,
+          subMessage: `Pehle registration kiya tha: ${registeredAtFormatted || 'Registration Verified'} • Pehli baar scan: ${firstScanHindi}`,
           details: {
             id: studentIdFound,
             name: existing?.name || studentNameScanned,
@@ -1108,19 +1197,27 @@ export default function App() {
             time: prevTime,
             photoUrl: studentPhotoFound,
             alreadyAdmitted: true,
-            admittedAt: prevTime
+            admittedAt: prevTime,
+            isPreRegistered: true,
+            registeredAt: registeredTimestamp,
+            registeredAtFormatted,
+            firstScanTimeFormatted: prevTime,
+            firstScanTimeHindi: firstScanHindi
           }
         });
-        setAiBotLastAction(`Duplicate Blocked: ${studentNameScanned} (${scannedRoll})`);
+        setAiBotLastAction(`Duplicate Blocked: ${studentNameScanned} (${scannedRoll}) • 1st Scan: ${prevTime}`);
       } else {
         // VALID PASS -> REQUIRE APPROVAL BUTTON (User: "admin ke scan kanre ke baaad aporve ka button ho")
         const scanTimeNow = formatScanTime();
+        const scanTimeNowHindi = formatTimeInHindiWords();
         playAiBotChime();
         triggerVibration([80, 40, 80]);
         setScanBanner({
           type: 'pending_approval',
           message: `📸 Pass Scan Ho Gaya: ${studentNameScanned}`,
-          subMessage: `Scan Time: ${scanTimeNow} • Vidyarthi ki photo aur details check karein, fir "Approve Entry" dabayein`,
+          subMessage: isPreRegistered
+            ? `Pehle hi registration kiya tha: ${registeredAtFormatted} • Pehli baar scan abhi ${scanTimeNowHindi} par ho raha hai`
+            : `Pehli baar scan: ${scanTimeNowHindi} • Details verify karke "Approve Entry" dabayein`,
           details: {
             id: studentIdFound,
             name: studentNameScanned,
@@ -1128,7 +1225,12 @@ export default function App() {
             phone: studentPhoneFound,
             course: studentCourseFound,
             photoUrl: studentPhotoFound,
-            time: scanTimeNow
+            time: scanTimeNow,
+            isPreRegistered,
+            registeredAt: registeredTimestamp,
+            registeredAtFormatted,
+            firstScanTimeFormatted: scanTimeNow,
+            firstScanTimeHindi: scanTimeNowHindi
           }
         });
         setAiBotLastAction(`Waiting for Approval: ${studentNameScanned} (${scannedRoll})`);
@@ -1272,17 +1374,19 @@ export default function App() {
         return;
       }
 
-      // 25 FPS for sub-second rapid detection + responsive scanning area
+      // 25 FPS for high speed detection, or 10 FPS in battery saving mode to preserve battery
+      const targetFps = isBatterySaverActiveRef.current ? 10 : 25;
       const config: Html5QrcodeCameraScanConfig = {
-        fps: 25,
+        fps: targetFps,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
           const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-          const edge = Math.max(160, Math.floor(minEdge * 0.88));
+          const edge = Math.max(160, Math.floor(minEdge * (isBatterySaverActiveRef.current ? 0.75 : 0.88)));
           return { width: edge, height: edge };
         },
         aspectRatio: 1.0
       };
 
+      let lastAutoScanTick = 0;
       await html5QrCodeRef.current.start(
         { facingMode: facingMode },
         config,
@@ -1291,6 +1395,12 @@ export default function App() {
           if (scanTriggerModeRef.current === 'click_to_scan') {
             return;
           }
+          // In battery saving mode, decrease scanning interval (throttle frequency to >= 600ms)
+          const now = Date.now();
+          if (isBatterySaverActiveRef.current && now - lastAutoScanTick < 600) {
+            return;
+          }
+          lastAutoScanTick = now;
           handleQrCodeSuccessRef.current(decodedText, false);
         },
         () => {
@@ -1312,6 +1422,21 @@ export default function App() {
       setIsCameraActive(false);
     }
   };
+
+  // If camera is running and battery saver mode changes, restart camera to apply new FPS and scan interval
+  const prevBatterySaverRef = useRef<boolean>(isBatterySaverActive);
+  useEffect(() => {
+    if (prevBatterySaverRef.current !== isBatterySaverActive) {
+      prevBatterySaverRef.current = isBatterySaverActive;
+      if (isCameraActiveRef.current) {
+        stopCamera().then(() => {
+          setTimeout(() => {
+            startCamera();
+          }, 300);
+        });
+      }
+    }
+  }, [isBatterySaverActive]);
 
   const stopCamera = async () => {
     // 1. Force hardware-level track shutdown immediately on any running video element
@@ -1673,6 +1798,7 @@ export default function App() {
           /* ========================================================= */
           <OwnerSection
             students={Object.values(registeredStudents)}
+            entries={entries}
             onRefresh={syncWithBackend}
             onLogout={handleOwnerLogout}
             onPreviewPhoto={setSelectedPreviewPhoto}
@@ -2172,6 +2298,33 @@ export default function App() {
                         <span>{scanTriggerMode === 'click_to_scan' ? '📸 Click to Scan' : '⚡ Auto 1-Shot'}</span>
                       </button>
 
+                      {/* 🔋 Battery Saving Mode Toggle & Status */}
+                      <button
+                        onClick={toggleBatterySaver}
+                        title={
+                          isBatterySaverActive
+                            ? 'Battery Saver Active: 10 FPS & Decreased Scan Frequency. Click to switch to 25 FPS High Performance'
+                            : 'Click to enable Battery Saver Mode (Reduces camera FPS to 10 & scan interval)'
+                        }
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                          isBatterySaverActive
+                            ? 'bg-amber-500/25 text-amber-300 border-amber-500/60 shadow-sm ring-1 ring-amber-400/40'
+                            : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        {isBatteryCharging ? (
+                          <BatteryCharging className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : isBatterySaverActive ? (
+                          <BatteryLow className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                        ) : (
+                          <Battery className="w-3.5 h-3.5 text-slate-300" />
+                        )}
+                        <span>
+                          {batteryLevel !== null ? `${batteryLevel}% ` : ''}
+                          {isBatterySaverActive ? '🔋 Saver (10 FPS)' : '⚡ 25 FPS'}
+                        </span>
+                      </button>
+
                       {/* Ready Next Student Scan */}
                       <button
                         onClick={handleNextScan}
@@ -2268,18 +2421,70 @@ export default function App() {
                           <p className="text-sm font-medium opacity-90 mt-0.5">{scanBanner.subMessage}</p>
                         )}
                         {scanBanner.details && (
-                          <div className="mt-2 text-xs flex flex-wrap gap-x-4 gap-y-1 opacity-90 font-mono bg-black/20 p-2 rounded-xl border border-white/10">
-                            <span>Roll: <strong className="text-pink-300">{scanBanner.details.roll}</strong></span>
-                            <span>Name: <strong className="text-white">{scanBanner.details.name}</strong></span>
-                            <span>Course: <strong className="text-purple-300">{scanBanner.details.course || 'HJMC'}</strong></span>
-                            {scanBanner.details.phone && (
-                              <span>Phone: <strong className="text-emerald-300">{scanBanner.details.phone}</strong></span>
-                            )}
-                            {scanBanner.details.time && (
-                              <span className="flex items-center gap-1 text-amber-300 font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
-                                <Clock className="w-3.5 h-3.5 text-amber-400" />
-                                <span>Time: <strong className="text-white">{scanBanner.details.time}</strong></span>
+                          <div className="space-y-2 mt-2">
+                            <div className="text-xs flex flex-wrap gap-x-4 gap-y-1 opacity-90 font-mono bg-black/20 p-2 rounded-xl border border-white/10">
+                              <span>Roll: <strong className="text-pink-300">{scanBanner.details.roll}</strong></span>
+                              <span>Name: <strong className="text-white">{scanBanner.details.name}</strong></span>
+                              <span>Course: <strong className="text-purple-300">{scanBanner.details.course || 'HJMC'}</strong></span>
+                              {scanBanner.details.phone && (
+                                <span>Phone: <strong className="text-emerald-300">{scanBanner.details.phone}</strong></span>
+                              )}
+                              {scanBanner.details.time && (
+                                <span className="flex items-center gap-1 text-amber-300 font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Scan Time: <strong className="text-white">{scanBanner.details.time}</strong></span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* 1. Registration Status & Real-time Kab Kiya Tha */}
+                            <div className="p-2.5 rounded-xl bg-purple-950/70 border border-purple-500/50 text-xs flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <div>
+                                  <span className="font-bold text-white block">
+                                    {scanBanner.details.isPreRegistered
+                                      ? '✅ Pehle Hi Registration Kiya Tha'
+                                      : '⚠️ Direct Pass (Registration Verified)'}
+                                  </span>
+                                  <span className="text-[11px] text-purple-200">
+                                    Kab kiya tha: <strong className="text-amber-300 font-mono">{scanBanner.details.registeredAtFormatted || 'Registration Pehle Se Verified'}</strong>
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                Real-Time Registry
                               </span>
+                            </div>
+
+                            {/* 2. Pahli Baar Scan Kitne Bajakar Kitne Minute Par Hua Tha */}
+                            {scanBanner.details.firstScanTimeHindi && (
+                              <div className={`p-2.5 rounded-xl text-xs flex items-center justify-between gap-2 flex-wrap border ${
+                                scanBanner.type === 'duplicate'
+                                  ? 'bg-red-950/80 border-red-500/60 text-red-200'
+                                  : 'bg-emerald-950/80 border-emerald-500/60 text-emerald-200'
+                              }`}>
+                                <div className="flex items-center gap-2">
+                                  <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                                  <div>
+                                    <span className="font-bold text-white block">
+                                      {scanBanner.type === 'duplicate'
+                                        ? '⚠️ Pahli Baar Scan Kab Hua Tha:'
+                                        : '🕒 Pehli Baar Scan Time:'}
+                                    </span>
+                                    <span className="text-[11px] font-mono font-bold text-amber-300">
+                                      {scanBanner.details.firstScanTimeHindi}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                  scanBanner.type === 'duplicate'
+                                    ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                }`}>
+                                  {scanBanner.type === 'duplicate' ? 'Duplicate Alert' : '1st Scan Verified'}
+                                </span>
+                              </div>
                             )}
                           </div>
                         )}
@@ -2370,6 +2575,33 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {/* 🔋 Battery Saver Mode Toggle */}
+                      <button
+                        onClick={toggleBatterySaver}
+                        title={
+                          isBatterySaverActive
+                            ? 'Battery Saver Active: 10 FPS & Decreased Scan Frequency. Click to switch to 25 FPS'
+                            : 'Click to enable Battery Saver (Reduces camera FPS to 10 & scan interval)'
+                        }
+                        className={`p-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer border ${
+                          isBatterySaverActive
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm ring-1 ring-amber-400/40'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        {isBatteryCharging ? (
+                          <BatteryCharging className="w-4 h-4 text-emerald-400" />
+                        ) : isBatterySaverActive ? (
+                          <BatteryLow className="w-4 h-4 text-amber-400 animate-pulse" />
+                        ) : (
+                          <Battery className="w-4 h-4 text-slate-400" />
+                        )}
+                        <span className="hidden sm:inline font-semibold">
+                          {batteryLevel !== null ? `${batteryLevel}% ` : ''}
+                          {isBatterySaverActive ? 'Saver (10 FPS)' : '25 FPS'}
+                        </span>
+                      </button>
+
                       {/* Audio beep mute/unmute */}
                       <button
                         onClick={() => setSoundEnabled(!soundEnabled)}
@@ -2435,13 +2667,22 @@ export default function App() {
                     {isCameraActive && (
                       <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4 z-20">
                         {/* Top AI Bot HUD indicator */}
-                        <div className="px-3.5 py-1.5 rounded-full bg-slate-950/85 border border-pink-500/50 backdrop-blur-md flex items-center gap-2 text-[11px] text-pink-300 font-bold shadow-lg">
-                          <Bot className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
-                          <span>
-                            {scanTriggerMode === 'click_to_scan'
-                              ? '📸 PHONE SHUTTER MODE: TAP OR CLICK TO SCAN'
-                              : '⚡ 1-SHOT AUTO SCAN (No Duplicate Loop)'}
-                          </span>
+                        <div className="flex items-center gap-2 flex-wrap justify-center">
+                          <div className="px-3.5 py-1.5 rounded-full bg-slate-950/85 border border-pink-500/50 backdrop-blur-md flex items-center gap-2 text-[11px] text-pink-300 font-bold shadow-lg">
+                            <Bot className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
+                            <span>
+                              {scanTriggerMode === 'click_to_scan'
+                                ? '📸 PHONE SHUTTER MODE: TAP OR CLICK TO SCAN'
+                                : '⚡ 1-SHOT AUTO SCAN (No Duplicate Loop)'}
+                            </span>
+                          </div>
+
+                          {isBatterySaverActive && (
+                            <div className="px-2.5 py-1 rounded-full bg-amber-950/90 border border-amber-500/50 backdrop-blur-md flex items-center gap-1.5 text-[10px] text-amber-300 font-bold shadow-lg animate-pulse">
+                              <BatteryLow className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Battery Saver: 10 FPS</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Centered Framing Box */}
