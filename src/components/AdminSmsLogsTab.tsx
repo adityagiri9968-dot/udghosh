@@ -15,7 +15,8 @@ import {
   Clock,
   Sparkles,
   User,
-  AlertTriangle
+  AlertTriangle,
+  Zap
 } from 'lucide-react';
 import { formatScanTime, formatIndianDateTime } from '../utils/timeFormat.ts';
 
@@ -24,7 +25,7 @@ export interface SmsRecord {
   roll: string;
   studentName: string;
   phone: string;
-  sender: 'UDGHOSH' | string;
+  sender: 'udghosh_hjmc_swagtam_by_Aditya' | 'UDGHOSH' | string;
   message: string;
   sentAt: string;
   timestamp: number;
@@ -36,13 +37,15 @@ interface AdminSmsLogsTabProps {
   onRefresh: () => Promise<void> | void;
   onSendCustomSms?: (data: { phone: string; studentName: string; roll: string; message?: string }) => Promise<void>;
   onOpenPhonePreview: (sms: SmsRecord) => void;
+  onOpenGatewaySettings?: () => void;
 }
 
 export const AdminSmsLogsTab: React.FC<AdminSmsLogsTabProps> = ({
   smsList,
   onRefresh,
   onSendCustomSms,
-  onOpenPhonePreview
+  onOpenPhonePreview,
+  onOpenGatewaySettings
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -171,6 +174,16 @@ export const AdminSmsLogsTab: React.FC<AdminSmsLogsTabProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {onOpenGatewaySettings && (
+              <button
+                onClick={onOpenGatewaySettings}
+                className="px-3.5 py-2.5 rounded-xl bg-purple-950/80 hover:bg-purple-900 border border-purple-500/50 text-purple-200 text-xs font-bold flex items-center gap-1.5 transition shadow cursor-pointer"
+                title="Configure Real Fast2SMS / Twilio / SIM SMS Gateway"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-300" />
+                <span>⚙️ Real SMS Gateway Setup</span>
+              </button>
+            )}
             <button
               onClick={() => setShowSendModal(true)}
               className="px-3.5 py-2.5 rounded-xl gradient-party hover:brightness-110 text-white text-xs font-bold flex items-center gap-1.5 transition shadow cursor-pointer"

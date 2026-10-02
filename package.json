@@ -27,6 +27,7 @@
     "react-dom": "^19.0.1",
     "recharts": "^3.10.1",
     "tsx": "^4.21.0",
+    "twilio": "^6.1.2",
     "vite": "^8.3.0"
   },
   "devDependencies": {

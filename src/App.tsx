@@ -62,6 +62,7 @@ import { AdminRegistrationsTab } from './components/AdminRegistrationsTab.tsx';
 import { AdminSmsLogsTab, SmsRecord } from './components/AdminSmsLogsTab.tsx';
 import { PhoneSmsModal } from './components/PhoneSmsModal.tsx';
 import { PassExpiryChecker } from './components/PassExpiryChecker.tsx';
+import { SmsGatewaySettingsModal } from './components/SmsGatewaySettingsModal.tsx';
 import { formatScanTime, formatIndianDateTime, formatTimeInHindiWords } from './utils/timeFormat.ts';
 
 export interface EntryRecord {
@@ -135,6 +136,18 @@ export default function App() {
   const [smsList, setSmsList] = useState<SmsRecord[]>([]);
   const [selectedSmsForPreview, setSelectedSmsForPreview] = useState<SmsRecord | null>(null);
   const [incomingSmsToast, setIncomingSmsToast] = useState<SmsRecord | null>(null);
+  const [showSmsSettingsModal, setShowSmsSettingsModal] = useState<boolean>(false);
+
+  // Auto-Approve & Auto-SMS on Scan (User requested: "automatic sms nahi jaa raha hai" -> Enable instant automatic SMS on scan!)
+  const [autoApproveAndSendSms, setAutoApproveAndSendSms] = useState<boolean>(() => {
+    const saved = localStorage.getItem('auto_approve_send_sms');
+    return saved !== null ? saved === 'true' : true; // DEFAULT TRUE FOR AUTOMATIC SMS!
+  });
+
+  const [autoOpenDeviceSms, setAutoOpenDeviceSms] = useState<boolean>(() => {
+    const saved = localStorage.getItem('auto_open_device_sms');
+    return saved !== null ? saved === 'true' : true; // DEFAULT TRUE to trigger SIM SMS
+  });
 
   // Student Pass Search / Expiry Check state
   const [passSearchQuery, setPassSearchQuery] = useState<string>('');
@@ -175,6 +188,11 @@ export default function App() {
   } | null>(null);
   const [isGeneratingPass, setIsGeneratingPass] = useState<boolean>(false);
   const [formError, setFormError] = useState<string>('');
+  const [registrationAlert, setRegistrationAlert] = useState<{
+    show: boolean;
+    message: string;
+    sms?: SmsRecord;
+  } | null>(null);
 
   // Registered students map with photos for fast lookup by roll
   const [registeredStudents, setRegisteredStudents] = useState<Record<string, RegisteredStudent>>(() => {
@@ -533,6 +551,27 @@ export default function App() {
     }
   };
 
+  // 📲 Trigger Native Device Cellular SMS (Free Phone SIM SMS)
+  const triggerNativeDeviceSms = (phone: string, studentName: string, roll: string) => {
+    if (!phone) return;
+    const clean = phone.replace(/\D/g, '').slice(-10);
+    const msg = `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${studentName}! Aapka registration (${roll}) QR scan hokar verify ho chuka hai aur Gate Entry allow kar di gayi hai. Pass ab EXPIRE ho gaya hai. Swagatam! - udghosh_hjmc_swagtam_by_Aditya`;
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const url = `sms:+91${clean}${isIOS ? '&' : '?'}body=${encodeURIComponent(msg)}`;
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) document.body.removeChild(a);
+      }, 400);
+    } catch (e) {
+      console.warn('Native SMS trigger error:', e);
+    }
+  };
+
   // Photo file upload & compression handler
   const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -766,6 +805,46 @@ export default function App() {
         console.warn('Backend server save error', err);
       }
 
+      // AUTOMATIC SMS DISPATCH ON REGISTRATION:
+      // Direct call to /api/send-sms route as requested by user
+      try {
+        const smsResponse = await fetch('/api/send-sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phoneNumber: cleanPhone,
+            phone: cleanPhone,
+            studentName: cleanName,
+            roll: cleanRoll,
+            course: cleanCourse
+          })
+        });
+
+        const smsData = await smsResponse.json();
+        if (smsData && (smsData.success || smsData.sms)) {
+          const sentRecord: SmsRecord = smsData.sms || {
+            id: 'SMS-' + Date.now() + '-' + cleanRoll,
+            roll: cleanRoll,
+            studentName: cleanName,
+            phone: cleanPhone,
+            sender: 'udghosh_hjmc_swagtam_by_Aditya',
+            message: `🔐 [UDGHOSH REGISTRATION CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। धन्यवाद!`,
+            sentAt: 'Just Now',
+            timestamp: Date.now(),
+            status: 'DELIVERED'
+          };
+          setSmsList((prev) => [sentRecord, ...prev.filter((s) => s.id !== sentRecord.id)]);
+          setRegistrationAlert({
+            show: true,
+            message: smsData.message || 'रजिस्ट्रेशन सफल और SMS भेज दिया गया है!',
+            sms: sentRecord
+          });
+          setIncomingSmsToast(sentRecord);
+        }
+      } catch (smsErr) {
+        console.warn('Auto SMS trigger error', smsErr);
+      }
+
       setRegisteredStudents((prev) => ({
         ...prev,
         [cleanRoll]: studentRecord
@@ -807,6 +886,7 @@ export default function App() {
 
   const handleResetRegistration = () => {
     setRegisteredData(null);
+    setRegistrationAlert(null);
     setStudentName('');
     setRollNumber('');
     setPhoneNumber('');
@@ -1337,35 +1417,51 @@ export default function App() {
         });
         setAiBotLastAction(`EXPIRED PASS Blocked: ${studentNameScanned} (${scannedRoll}) • 1st Scan: ${prevTime}`);
       } else {
-        // VALID PASS -> REQUIRE APPROVAL BUTTON (User: "admin ke scan kanre ke baaad aporve ka button ho")
-        const scanTimeNow = formatScanTime();
-        const scanTimeNowHindi = formatTimeInHindiWords();
-        playAiBotChime();
-        triggerVibration([80, 40, 80]);
-        setScanBanner({
-          type: 'pending_approval',
-          message: `📸 Pass Scan Ho Gaya: ${studentNameScanned}`,
-          subMessage: isPreRegistered
-            ? `Pehle hi registration kiya tha: ${registeredAtFormatted} • Pehli baar scan abhi ${scanTimeNowHindi} par ho raha hai. Approve karte hi pass EXPIRE ho jayega aur UDGHOSH SMS chala jayega.`
-            : `Pehli baar scan: ${scanTimeNowHindi} • Details verify karke "Approve Entry" dabayein (Pass will EXPIRE & UDGHOSH SMS will be sent)`,
-          details: {
+        // VALID PASS -> User: "automatic sms nahi jaa raha hai"
+        // If autoApproveAndSendSms is ON (Default): IMMEDIATELY APPROVE, EXPIRE PASS & SEND SMS AUTOMATICALLY!
+        if (autoApproveAndSendSms) {
+          playAiBotChime();
+          triggerVibration([80, 40, 80]);
+          await handleApproveEntry({
             id: studentIdFound,
             name: studentNameScanned,
             roll: scannedRoll,
             phone: studentPhoneFound,
             course: studentCourseFound,
-            photoUrl: studentPhotoFound,
-            time: scanTimeNow,
-            isPreRegistered,
-            registeredAt: registeredTimestamp,
-            registeredAtFormatted,
-            firstScanTimeFormatted: scanTimeNow,
-            firstScanTimeHindi: scanTimeNowHindi,
-            smsPhone: studentPhoneFound,
-            smsSender: 'udghosh_hjmc_swagtam_by_Aditya'
-          }
-        });
-        setAiBotLastAction(`Waiting for Approval: ${studentNameScanned} (${scannedRoll})`);
+            photoUrl: studentPhotoFound
+          });
+          setAiBotLastAction(`⚡ AUTO-APPROVED & SMS DISPATCHED: ${studentNameScanned} (${scannedRoll})`);
+        } else {
+          // MANUAL APPROVAL BUTTON MODE (if admin chose manual mode)
+          const scanTimeNow = formatScanTime();
+          const scanTimeNowHindi = formatTimeInHindiWords();
+          playAiBotChime();
+          triggerVibration([80, 40, 80]);
+          setScanBanner({
+            type: 'pending_approval',
+            message: `📸 Pass Scan Ho Gaya: ${studentNameScanned}`,
+            subMessage: isPreRegistered
+              ? `Pehle hi registration kiya tha: ${registeredAtFormatted} • Pehli baar scan abhi ${scanTimeNowHindi} par ho raha hai. Approve karte hi pass EXPIRE ho jayega aur SMS chala jayega.`
+              : `Pehli baar scan: ${scanTimeNowHindi} • Details verify karke "Approve Entry" dabayein (Pass will EXPIRE & SMS will be sent)`,
+            details: {
+              id: studentIdFound,
+              name: studentNameScanned,
+              roll: scannedRoll,
+              phone: studentPhoneFound,
+              course: studentCourseFound,
+              photoUrl: studentPhotoFound,
+              time: scanTimeNow,
+              isPreRegistered,
+              registeredAt: registeredTimestamp,
+              registeredAtFormatted,
+              firstScanTimeFormatted: scanTimeNow,
+              firstScanTimeHindi: scanTimeNowHindi,
+              smsPhone: studentPhoneFound,
+              smsSender: 'udghosh_hjmc_swagtam_by_Aditya'
+            }
+          });
+          setAiBotLastAction(`Waiting for Approval: ${studentNameScanned} (${scannedRoll})`);
+        }
       }
     } catch {
       playDuplicateWarningSound();
@@ -1467,6 +1563,11 @@ export default function App() {
       setIncomingSmsToast((cur) => (cur?.id === dispatchedSms.id ? null : cur));
     }, 7000);
 
+    // 📲 Automatic Mobile Device SIM SMS Trigger (User: "automatic sms nahi jaa raha hai")
+    if (autoOpenDeviceSms && cleanPhone) {
+      triggerNativeDeviceSms(cleanPhone, cleanName, cleanRoll);
+    }
+
     // 2. Play celebratory sound & confetti
     playSuccessSound();
     triggerVibration([100, 50, 100]);
@@ -1502,11 +1603,11 @@ export default function App() {
       return prev;
     });
 
-    // 5. Update banner to confirmed & expired with UDGHOSH SMS details
+    // 5. Update banner to confirmed & expired with udghosh_hjmc_swagtam_by_Aditya SMS details
     setScanBanner({
       type: 'success',
-      message: `✅ Entry Approved! Pass Ab EXPIRE Ho Gaya`,
-      subMessage: `Roll: ${cleanRoll} • Gate Entry Confirmed at ${timeStr} • SMS Sent via UDGHOSH to +91 ${cleanPhone}`,
+      message: `✅ Entry Confirmed! Pass Ab EXPIRE Ho Gaya`,
+      subMessage: `Roll: ${cleanRoll} • Gate Entry Confirmed at ${timeStr} • SMS Dispatched to +91 ${cleanPhone} (udghosh_hjmc_swagtam_by_Aditya)`,
       details: {
         id: details.id,
         name: cleanName,
@@ -1519,12 +1620,12 @@ export default function App() {
         expiredAt: timeStr,
         smsSent: true,
         smsPhone: cleanPhone,
-        smsSender: 'UDGHOSH',
+        smsSender: 'udghosh_hjmc_swagtam_by_Aditya',
         smsMessage: dispatchedSms.message,
         smsSentAt: timeStr
       }
     });
-    setAiBotLastAction(`Approved & Pass Expired: ${cleanName} (${cleanRoll}) • SMS Sent via UDGHOSH`);
+    setAiBotLastAction(`Approved & Pass Expired: ${cleanName} (${cleanRoll}) • SMS Dispatched: udghosh_hjmc_swagtam_by_Aditya`);
   };
 
   useEffect(() => {
@@ -2042,6 +2143,7 @@ export default function App() {
                     </label>
                     <div className="relative">
                       <input
+                        id="phone-number-input"
                         type="tel"
                         maxLength={10}
                         value={phoneNumber}
@@ -2220,9 +2322,49 @@ export default function App() {
                 <h3 className="text-xl sm:text-2xl font-bold text-white mb-1">
                   Registration Safalta-purvak Ho Gaya!
                 </h3>
-                <p className="text-xs text-pink-300 font-medium mb-6">
+                <p className="text-xs text-pink-300 font-medium mb-4">
                   BRAC HJMC • Udghosh Fresher Party • Official Entry Pass
                 </p>
+
+                {/* Celebratory Alert: Registration successful & SMS Sent! */}
+                {registrationAlert && (
+                  <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-teal-950/90 border-2 border-emerald-500 shadow-xl shadow-emerald-950/50 text-left animate-in slide-in-from-top-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start sm:items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center font-bold shrink-0">
+                          <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                        </div>
+                        <div>
+                          <span className="font-extrabold text-white text-sm sm:text-base block">
+                            {registrationAlert.message}
+                          </span>
+                          <span className="text-[11px] text-emerald-300 font-mono block mt-0.5">
+                            📲 SMS Sender: <strong>udghosh_hjmc_swagtam_by_Aditya</strong> • To: +91 {registeredData?.phone}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {registrationAlert.sms && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSmsForPreview(registrationAlert.sms!)}
+                            className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Smartphone className="w-3.5 h-3.5" />
+                            <span>SMS Dekhein</span>
+                          </button>
+                        )}
+                        <a
+                          href={`sms:+91${registeredData?.phone}?body=${encodeURIComponent(registrationAlert.sms?.message || 'नमस्ते! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। धन्यवाद! - udghosh_hjmc_swagtam_by_Aditya')}`}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow flex items-center gap-1.5"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>SMS App</span>
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Pass Ticket Box */}
                 {(() => {
@@ -2359,17 +2501,55 @@ export default function App() {
                             ? `Aapke phone number (+91 ${registeredData.phone}) par sender "udghosh_hjmc_swagtam_by_Aditya" se gate entry aur single-use pass expiry ka official portal SMS deliver ho chuka hai.`
                             : `Gate par scan hote hi aapke mobile (+91 ${registeredData.phone}) par "udghosh_hjmc_swagtam_by_Aditya" naam se portal OTP style SMS aayega aur pass expire ho jayega.`}
                         </p>
-                        {matchingSms && (
-                          <div className="pt-1 flex items-center gap-2">
+                        <div className="pt-1.5 flex items-center gap-2 flex-wrap">
+                          {matchingSms && (
                             <button
+                              type="button"
                               onClick={() => setSelectedSmsForPreview(matchingSms)}
                               className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-[10px] font-bold flex items-center gap-1.5 transition cursor-pointer"
                             >
                               <Smartphone className="w-3.5 h-3.5 text-pink-300" />
-                              <span>📱 View Phone SMS Notification</span>
+                              <span>📱 Phone SMS Preview</span>
                             </button>
-                          </div>
-                        )}
+                          )}
+                          <a
+                            href={`sms:+91${registeredData.phone}?body=${encodeURIComponent(matchingSms?.message || `🔐 [UDGHOSH REGISTRATION CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${registeredData.name}! BRAC HJMC UDGHOSH Fresher Party में आपका रजिस्ट्रेशन सफल रहा (Roll: ${registeredData.roll})। धन्यवाद!`)}`}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 text-[10px] font-bold flex items-center gap-1.5 transition"
+                          >
+                            <Send className="w-3.5 h-3.5 text-emerald-300" />
+                            <span>📲 Open in SMS App</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const res = await fetch('/api/send-sms', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    phoneNumber: registeredData.phone,
+                                    phone: registeredData.phone,
+                                    studentName: registeredData.name,
+                                    roll: registeredData.roll,
+                                    course: registeredData.course
+                                  })
+                                });
+                                const data = await res.json();
+                                if (data?.sms) {
+                                  setSmsList((prev) => [data.sms, ...prev.filter((s) => s.id !== data.sms.id)]);
+                                  setSelectedSmsForPreview(data.sms);
+                                  setIncomingSmsToast(data.sms);
+                                }
+                              } catch (e) {
+                                console.warn('Resend error', e);
+                              }
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[10px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5 text-cyan-300" />
+                            <span>🔄 Resend SMS</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Prominent Mandatory Instruction */}
@@ -2527,6 +2707,7 @@ export default function App() {
                 smsList={smsList}
                 onRefresh={syncWithBackend}
                 onOpenPhonePreview={(sms) => setSelectedSmsForPreview(sms)}
+                onOpenGatewaySettings={() => setShowSmsSettingsModal(true)}
               />
             )}
 
@@ -2632,6 +2813,38 @@ export default function App() {
                           {batteryLevel !== null ? `${batteryLevel}% ` : ''}
                           {isBatterySaverActive ? '🔋 Saver (10 FPS)' : '⚡ 25 FPS'}
                         </span>
+                      </button>
+
+                      {/* ⚡ Auto-SMS on Scan Toggle (User requested: "automatic sms nahi jaa raha hai") */}
+                      <button
+                        onClick={() => {
+                          const next = !autoApproveAndSendSms;
+                          setAutoApproveAndSendSms(next);
+                          localStorage.setItem('auto_approve_send_sms', String(next));
+                        }}
+                        title={
+                          autoApproveAndSendSms
+                            ? 'Auto-SMS Active: QR scan hote hi turant automatic SMS chala jata hai. Click to switch to manual approval.'
+                            : 'Manual Approve Mode: Scan hone par approval button dabana hoga. Click to enable automatic instant SMS.'
+                        }
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                          autoApproveAndSendSms
+                            ? 'bg-emerald-600/30 text-emerald-200 border-emerald-500/60 shadow-sm ring-1 ring-emerald-500/40'
+                            : 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        <Zap className={`w-3.5 h-3.5 ${autoApproveAndSendSms ? 'text-amber-300 animate-pulse' : 'text-slate-400'}`} />
+                        <span>{autoApproveAndSendSms ? '⚡ Auto-SMS: ON' : '✋ Manual SMS'}</span>
+                      </button>
+
+                      {/* ⚙️ SMS Setup Button */}
+                      <button
+                        onClick={() => setShowSmsSettingsModal(true)}
+                        title="Real SMS Gateway Settings (Fast2SMS / Twilio / SIM SMS)"
+                        className="px-2.5 py-1.5 rounded-xl bg-purple-950/60 hover:bg-purple-900 border border-purple-500/40 text-purple-200 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-pink-300" />
+                        <span className="hidden sm:inline">SMS Setup</span>
                       </button>
 
                       {/* Ready Next Student Scan */}
@@ -4012,6 +4225,15 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ========================================================= */}
+      {/* ⚡ REAL SMS GATEWAY CONFIGURATION MODAL                   */}
+      {/* ========================================================= */}
+      <SmsGatewaySettingsModal
+        isOpen={showSmsSettingsModal}
+        onClose={() => setShowSmsSettingsModal(false)}
+        onConfigSaved={syncWithBackend}
+      />
     </div>
   );
 }

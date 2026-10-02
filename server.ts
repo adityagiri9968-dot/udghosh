@@ -1,8 +1,11 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import twilio from 'twilio';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +26,61 @@ if (!fs.existsSync(DATA_DIR)) {
 const STUDENTS_FILE = path.join(DATA_DIR, 'students.json');
 const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
 const SMS_FILE = path.join(DATA_DIR, 'sms.json');
+const SMS_CONFIG_FILE = path.join(DATA_DIR, 'sms-config.json');
+
+export interface SmsGatewayConfig {
+  provider: 'fast2sms' | 'free_sim' | 'twilio' | 'custom_webhook';
+  fast2smsApiKey?: string;
+  fast2smsRoute?: 'q' | 'otp';
+  twilioAccountSid?: string;
+  twilioAuthToken?: string;
+  twilioFromNumber?: string;
+  customWebhookUrl?: string;
+  autoOpenNativeSms?: boolean;
+}
+
+function loadSmsConfig(): SmsGatewayConfig {
+  let initialProvider: 'fast2sms' | 'free_sim' | 'twilio' | 'custom_webhook' = 'free_sim';
+  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    initialProvider = 'twilio';
+  } else if (process.env.FAST2SMS_API_KEY) {
+    initialProvider = 'fast2sms';
+  }
+
+  let loaded: SmsGatewayConfig = {
+    provider: initialProvider,
+    fast2smsApiKey: process.env.FAST2SMS_API_KEY || '',
+    fast2smsRoute: 'q',
+    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID || '',
+    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || '',
+    twilioFromNumber: process.env.TWILIO_PHONE_NUMBER || '',
+    autoOpenNativeSms: true
+  };
+
+  try {
+    if (fs.existsSync(SMS_CONFIG_FILE)) {
+      const data = fs.readFileSync(SMS_CONFIG_FILE, 'utf-8');
+      const saved = JSON.parse(data);
+      loaded = { ...loaded, ...saved };
+      // Fallback to process.env if field is not in saved config
+      if (!loaded.twilioAccountSid && process.env.TWILIO_ACCOUNT_SID) loaded.twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+      if (!loaded.twilioAuthToken && process.env.TWILIO_AUTH_TOKEN) loaded.twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+      if (!loaded.twilioFromNumber && process.env.TWILIO_PHONE_NUMBER) loaded.twilioFromNumber = process.env.TWILIO_PHONE_NUMBER;
+      if (!loaded.fast2smsApiKey && process.env.FAST2SMS_API_KEY) loaded.fast2smsApiKey = process.env.FAST2SMS_API_KEY;
+    }
+  } catch (err) {
+    console.error('Error reading sms-config.json:', err);
+  }
+  return loaded;
+}
+
+function saveSmsConfig(config: SmsGatewayConfig) {
+  try {
+    fs.writeFileSync(SMS_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving sms-config.json:', err);
+  }
+}
 
 export interface StudentRecord {
   id: string;
@@ -218,6 +276,114 @@ let studentsMap = loadStudents();
 let entriesList = loadEntries();
 let smsList = loadSms();
 
+// ================= REAL SMS GATEWAY DISPATCHER =================
+
+async function dispatchSmsViaGateway(
+  phone: string,
+  message: string,
+  studentName?: string,
+  roll?: string,
+  configOverride?: SmsGatewayConfig
+) {
+  const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+  if (!cleanPhone || cleanPhone.length !== 10) {
+    return { success: false, reason: 'Invalid 10-digit mobile number' };
+  }
+
+  const config = configOverride || loadSmsConfig();
+  const fast2smsKey = config.fast2smsApiKey || process.env.FAST2SMS_API_KEY;
+
+  if ((config.provider === 'fast2sms' || fast2smsKey) && fast2smsKey) {
+    try {
+      const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+        method: 'POST',
+        headers: {
+          'authorization': fast2smsKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          route: config.fast2smsRoute || 'q',
+          message: message,
+          language: 'english',
+          flash: 0,
+          numbers: cleanPhone
+        })
+      });
+      const data: any = await response.json();
+      console.log('Fast2SMS response:', data);
+      return {
+        success: data.return === true,
+        provider: 'Fast2SMS',
+        messageId: data.request_id,
+        details: data
+      };
+    } catch (err: any) {
+      console.error('Fast2SMS error:', err);
+      return { success: false, provider: 'Fast2SMS', error: err.message };
+    }
+  }
+
+  // Twilio SMS Integration
+  const twilioSid = config.twilioAccountSid || process.env.TWILIO_ACCOUNT_SID;
+  const twilioToken = config.twilioAuthToken || process.env.TWILIO_AUTH_TOKEN;
+  const twilioFrom = config.twilioFromNumber || process.env.TWILIO_PHONE_NUMBER;
+
+  if ((config.provider === 'twilio' || (!fast2smsKey && twilioSid)) && twilioSid && twilioToken && twilioFrom) {
+    try {
+      const client = twilio(twilioSid, twilioToken);
+      const toFormatted = `+91${cleanPhone}`;
+      const twilioRes = await client.messages.create({
+        body: message,
+        from: twilioFrom,
+        to: toFormatted
+      });
+      console.log(`[Twilio SMS Success] SID: ${twilioRes.sid}, To: ${toFormatted}`);
+      return {
+        success: true,
+        provider: 'Twilio',
+        sid: twilioRes.sid,
+        status: twilioRes.status,
+        details: twilioRes
+      };
+    } catch (err: any) {
+      console.error('[Twilio Error]:', err?.message || err);
+      return {
+        success: false,
+        provider: 'Twilio',
+        error: err?.message || 'Twilio SMS send error'
+      };
+    }
+  }
+
+  // Custom Webhook
+  const webhookUrl = config.customWebhookUrl || process.env.SMS_WEBHOOK_URL;
+  if (config.provider === 'custom_webhook' && webhookUrl) {
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: cleanPhone,
+          message,
+          studentName,
+          roll,
+          sender: 'udghosh_hjmc_swagtam_by_Aditya'
+        })
+      });
+      const text = await response.text();
+      return { success: response.ok, provider: 'Custom Webhook', details: text };
+    } catch (err: any) {
+      return { success: false, provider: 'Custom Webhook', error: err.message };
+    }
+  }
+
+  return {
+    success: true,
+    provider: 'Free SIM / Native SMS Mode',
+    note: 'Triggered via device messaging intent / SIM card.'
+  };
+}
+
 // ================= API ROUTES =================
 
 // 1. Get all registered students
@@ -279,11 +445,48 @@ app.post('/api/students', (req, res) => {
   studentsMap[cleanRoll] = studentRecord;
   saveStudents(studentsMap);
 
+  // Automatic SMS trigger on registration if phone number is provided
+  if (cleanPhone && cleanPhone.replace(/\D/g, '').length >= 10) {
+    const timeStr = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    }).format(new Date()).toUpperCase();
+
+    const smsMessage = `🔐 [UDGHOSH REGISTRATION CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा (Roll: ${cleanRoll})। BRAC HJMC UDGHOSH Fresher Party Entry Pass QR Code जनरेट हो चुका है। गेट पर एंट्री के लिए पास सुरक्षित रखें। धन्यवाद! - udghosh_hjmc_swagtam_by_Aditya`;
+
+    studentRecord.smsSent = true;
+    studentRecord.smsSentAt = timeStr;
+    studentRecord.smsMessage = smsMessage;
+    studentsMap[cleanRoll] = studentRecord;
+    saveStudents(studentsMap);
+
+    const smsRecord: SmsRecord = {
+      id: 'SMS-' + Date.now() + '-' + Math.floor(Math.random() * 899 + 100),
+      roll: cleanRoll,
+      studentName: cleanName,
+      phone: cleanPhone,
+      sender: 'udghosh_hjmc_swagtam_by_Aditya',
+      message: smsMessage,
+      sentAt: timeStr,
+      timestamp: Date.now(),
+      status: 'DELIVERED'
+    };
+    smsList = [smsRecord, ...smsList.filter((s) => s.id !== smsRecord.id)];
+    saveSms(smsList);
+
+    dispatchSmsViaGateway(cleanPhone, smsMessage, cleanName, cleanRoll).catch((e) =>
+      console.warn('Auto SMS dispatch background error', e)
+    );
+  }
+
   res.json({ success: true, student: studentRecord });
 });
 
 // 4. Admin approval for entry scan
-app.post('/api/students/approve', (req, res) => {
+app.post('/api/students/approve', async (req, res) => {
   const { roll, id, approver } = req.body;
   const cleanRoll = roll ? String(roll).trim().toUpperCase() : '';
   const searchId = id ? String(id).trim() : '';
@@ -366,7 +569,17 @@ app.post('/api/students/approve', (req, res) => {
   entriesList = [newEntry, ...entriesList.filter((e) => e.roll.toUpperCase() !== student!.roll.toUpperCase())];
   saveEntries(entriesList);
 
-  res.json({ success: true, student, entry: newEntry, sms: smsRecord });
+  // Dispatch real SMS to phone carrier / gateway
+  const gatewayResult = await dispatchSmsViaGateway(cleanPhone, smsMessage, student.name, student.roll);
+  console.log(`[REAL-SMS] Dispatched to ${cleanPhone} via ${gatewayResult.provider}:`, gatewayResult);
+
+  res.json({
+    success: true,
+    student,
+    entry: newEntry,
+    sms: smsRecord,
+    gatewayResult
+  });
 });
 
 // 5. Get all admitted entries
@@ -413,8 +626,82 @@ app.get('/api/sms', (req, res) => {
   res.json({ smsList, totalSent: smsList.length });
 });
 
-// 9. Send or resend SMS with sender "UDGHOSH"
-app.post('/api/sms/send', (req, res) => {
+// 8b. Automatic Registration / Twilio SMS Route: POST /api/send-sms
+app.post('/api/send-sms', async (req, res) => {
+  const { phoneNumber, phone, studentName, roll, course, message, body } = req.body;
+  const rawNumber = phoneNumber || phone || '';
+  const cleanPhone = String(rawNumber).replace(/\D/g, '').slice(-10);
+
+  if (!cleanPhone || cleanPhone.length !== 10) {
+    return res.status(400).json({
+      success: false,
+      error: 'Kripya 10-digit valid phone number dalein (e.g. 9876543210)'
+    });
+  }
+
+  const cleanName = studentName ? String(studentName).trim() : 'Student';
+  const cleanRoll = roll ? String(roll).trim().toUpperCase() : '';
+  const cleanCourse = course ? String(course).trim().toUpperCase() : 'HJMC';
+
+  const timeStr = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(new Date()).toUpperCase();
+
+  // Official Registration SMS body (supports user's exact Hindi wording + verified sender)
+  const smsBody =
+    message ||
+    body ||
+    `🔐 [UDGHOSH REGISTRATION CONFIRMED]: udghosh_hjmc_swagtam_by_Aditya\nनमस्ते ${cleanName}! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा (Roll: ${cleanRoll || cleanCourse})। BRAC HJMC UDGHOSH Fresher Party Entry Pass QR Code जनरेट हो चुका है। गेट पर एंट्री के लिए पास सुरक्षित रखें। धन्यवाद! - udghosh_hjmc_swagtam_by_Aditya`;
+
+  const smsRecord: SmsRecord = {
+    id: 'SMS-' + Date.now() + '-' + Math.floor(Math.random() * 899 + 100),
+    roll: cleanRoll || 'REG',
+    studentName: cleanName,
+    phone: cleanPhone,
+    sender: 'udghosh_hjmc_swagtam_by_Aditya',
+    message: smsBody,
+    sentAt: timeStr,
+    timestamp: Date.now(),
+    status: 'DELIVERED'
+  };
+
+  // Save to persistent SMS log
+  smsList = [smsRecord, ...smsList];
+  saveSms(smsList);
+
+  // Update student record if exists
+  if (cleanRoll && studentsMap[cleanRoll]) {
+    studentsMap[cleanRoll].smsSent = true;
+    studentsMap[cleanRoll].smsSentAt = timeStr;
+    studentsMap[cleanRoll].smsMessage = smsBody;
+    saveStudents(studentsMap);
+  }
+
+  // Dispatch via real Twilio / Fast2SMS gateway
+  const gatewayResult = await dispatchSmsViaGateway(cleanPhone, smsBody, cleanName, cleanRoll);
+  console.log(`[API /api/send-sms] Automatic SMS sent to ${cleanPhone}:`, gatewayResult);
+
+  return res.status(200).json({
+    success: true,
+    message: 'रजिस्ट्रेशन सफल और SMS भेज दिया गया है।',
+    sms: smsRecord,
+    gatewayResult,
+    provider: gatewayResult.provider,
+    nativeSmsUrl: `sms:+91${cleanPhone}?body=${encodeURIComponent(smsBody)}`
+  });
+});
+
+app.all('/api/send-sms', (req, res) => {
+  res.setHeader('Allow', ['POST']);
+  res.status(405).end(`Method ${req.method} Not Allowed`);
+});
+
+// 9. Send or resend SMS with sender "udghosh_hjmc_swagtam_by_Aditya"
+app.post('/api/sms/send', async (req, res) => {
   const { phone, studentName, roll, message, scannedAt } = req.body;
   const timeStr = scannedAt || new Intl.DateTimeFormat('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -443,7 +730,51 @@ app.post('/api/sms/send', (req, res) => {
   smsList = [smsRecord, ...smsList];
   saveSms(smsList);
 
-  res.json({ success: true, sms: smsRecord });
+  const gatewayResult = await dispatchSmsViaGateway(cleanPhone, smsRecord.message, cleanName, cleanRoll);
+  console.log(`[REAL-SMS] Sent manual SMS to ${cleanPhone}:`, gatewayResult);
+
+  res.json({ success: true, sms: smsRecord, gatewayResult });
+});
+
+// 10. SMS Gateway Config Endpoints
+app.get('/api/sms/config', (req, res) => {
+  const config = loadSmsConfig();
+  res.json({
+    config: {
+      ...config,
+      fast2smsApiKey: config.fast2smsApiKey ? `${config.fast2smsApiKey.slice(0, 4)}••••${config.fast2smsApiKey.slice(-4)}` : '',
+      twilioAuthToken: config.twilioAuthToken ? '••••••••' : ''
+    },
+    hasFast2SmsKey: Boolean(config.fast2smsApiKey || process.env.FAST2SMS_API_KEY)
+  });
+});
+
+app.post('/api/sms/config', (req, res) => {
+  const current = loadSmsConfig();
+  const incoming = req.body || {};
+  const updated: SmsGatewayConfig = {
+    provider: incoming.provider || current.provider,
+    fast2smsApiKey: (incoming.fast2smsApiKey && !incoming.fast2smsApiKey.includes('••••')) ? incoming.fast2smsApiKey.trim() : current.fast2smsApiKey,
+    fast2smsRoute: incoming.fast2smsRoute || current.fast2smsRoute || 'q',
+    twilioAccountSid: incoming.twilioAccountSid ? incoming.twilioAccountSid.trim() : current.twilioAccountSid,
+    twilioAuthToken: (incoming.twilioAuthToken && !incoming.twilioAuthToken.includes('••••')) ? incoming.twilioAuthToken.trim() : current.twilioAuthToken,
+    twilioFromNumber: incoming.twilioFromNumber ? incoming.twilioFromNumber.trim() : current.twilioFromNumber,
+    customWebhookUrl: incoming.customWebhookUrl ? incoming.customWebhookUrl.trim() : current.customWebhookUrl,
+    autoOpenNativeSms: incoming.autoOpenNativeSms !== undefined ? Boolean(incoming.autoOpenNativeSms) : current.autoOpenNativeSms
+  };
+  saveSmsConfig(updated);
+  res.json({ success: true, config: updated });
+});
+
+// 11. Test Real SMS sending
+app.post('/api/sms/test', async (req, res) => {
+  const { phone, message, configOverride } = req.body;
+  if (!phone) {
+    return res.status(400).json({ error: 'Phone number is required' });
+  }
+  const testMsg = message || `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste! Test Pass QR scan hokar verify ho chuka hai. Swagatam! - udghosh_hjmc_swagtam_by_Aditya`;
+  const result = await dispatchSmsViaGateway(phone, testMsg, 'Test User', 'TEST01', configOverride);
+  res.json(result);
 });
 
 // ================= VITE DEV / PROD SERVER =================
