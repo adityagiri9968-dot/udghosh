@@ -22,6 +22,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const STUDENTS_FILE = path.join(DATA_DIR, 'students.json');
 const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
+const SMS_FILE = path.join(DATA_DIR, 'sms.json');
 
 export interface StudentRecord {
   id: string;
@@ -34,6 +35,11 @@ export interface StudentRecord {
   admitted: boolean;
   admittedAt?: string;
   admittedTimestamp?: number;
+  isExpired?: boolean;
+  expiredAt?: string;
+  smsSent?: boolean;
+  smsSentAt?: string;
+  smsMessage?: string;
 }
 
 export interface EntryRecord {
@@ -46,6 +52,18 @@ export interface EntryRecord {
   timestamp: number;
   photoUrl?: string;
   approvedBy?: string;
+}
+
+export interface SmsRecord {
+  id: string;
+  roll: string;
+  studentName: string;
+  phone: string;
+  sender: 'udghosh_hjmc_swagtam_by_Aditya' | 'UDGHOSH' | string;
+  message: string;
+  sentAt: string;
+  timestamp: number;
+  status: 'DELIVERED';
 }
 
 // Initial demo students (with default course: HJMC)
@@ -163,8 +181,42 @@ function saveEntries(entries: EntryRecord[]) {
   }
 }
 
+function loadSms(): SmsRecord[] {
+  try {
+    if (fs.existsSync(SMS_FILE)) {
+      const data = fs.readFileSync(SMS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading sms file:', err);
+  }
+  const initialSms: SmsRecord[] = INITIAL_DEMO_STUDENTS.filter((s) => s.admitted).map((s) => ({
+    id: 'SMS-' + (s.admittedTimestamp || Date.now()) + '-' + s.roll,
+    roll: s.roll,
+    studentName: s.name,
+    phone: s.phone,
+    sender: 'udghosh_hjmc_swagtam_by_Aditya',
+    message: `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${s.name}! Aapka registration (${s.roll}) QR scan hokar ${s.admittedAt || '09:15:30 AM'} par safalta-purvak verify ho chuka hai aur Gate Entry allow kar di gayi hai. Aapka single-use pass ab EXPIRE ho gaya hai. Swagatam! - udghosh_hjmc_swagtam_by_Aditya`,
+    sentAt: s.admittedAt || '09:15:30 AM',
+    timestamp: s.admittedTimestamp || Date.now(),
+    status: 'DELIVERED'
+  }));
+  saveSms(initialSms);
+  return initialSms;
+}
+
+function saveSms(sms: SmsRecord[]) {
+  try {
+    fs.writeFileSync(SMS_FILE, JSON.stringify(sms, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving sms file:', err);
+  }
+}
+
 let studentsMap = loadStudents();
 let entriesList = loadEntries();
+let smsList = loadSms();
 
 // ================= API ROUTES =================
 
@@ -176,14 +228,20 @@ app.get('/api/students', (req, res) => {
   });
 });
 
-// 2. Lookup single student by roll or ID
+// 2. Lookup single student by roll, ID or Phone number
 app.get('/api/students/:rollOrId', (req, res) => {
-  const query = req.params.rollOrId.trim().toUpperCase();
+  const raw = req.params.rollOrId.trim();
+  const query = raw.toUpperCase();
+  const digitsOnly = raw.replace(/\D/g, '');
   let student: StudentRecord | undefined = studentsMap[query];
   if (!student) {
-    student = Object.values(studentsMap).find(
-      (s) => s.id.toUpperCase() === query || s.roll.toUpperCase() === query
-    );
+    student = Object.values(studentsMap).find((s) => {
+      if (s.id.toUpperCase() === query || s.roll.toUpperCase() === query) return true;
+      if (digitsOnly && digitsOnly.length >= 10 && s.phone && s.phone.replace(/\D/g, '') === digitsOnly) {
+        return true;
+      }
+      return false;
+    });
   }
   if (!student) {
     return res.status(404).json({ error: 'Student not found in registry' });
@@ -264,6 +322,31 @@ app.post('/api/students/approve', (req, res) => {
   student.admitted = true;
   student.admittedAt = clientTime;
   student.admittedTimestamp = entryTimestamp;
+  student.isExpired = true;
+  student.expiredAt = clientTime;
+
+  // Auto-generate and send official SMS under sender name "udghosh_hjmc_swagtam_by_Aditya"
+  const cleanPhone = student.phone || '';
+  const smsMessage = `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${student.name}! Aapka registration (${student.roll}) QR scan hokar ${clientTime} par safalta-purvak verify ho chuka hai aur Gate Entry allow kar di gayi hai. Aapka single-use pass ab EXPIRE ho gaya hai. Swagatam! - udghosh_hjmc_swagtam_by_Aditya`;
+
+  const smsRecord: SmsRecord = {
+    id: 'SMS-' + Date.now() + '-' + Math.floor(Math.random() * 899 + 100),
+    roll: student.roll,
+    studentName: student.name,
+    phone: cleanPhone,
+    sender: 'udghosh_hjmc_swagtam_by_Aditya',
+    message: smsMessage,
+    sentAt: clientTime,
+    timestamp: entryTimestamp,
+    status: 'DELIVERED'
+  };
+
+  student.smsSent = true;
+  student.smsSentAt = clientTime;
+  student.smsMessage = smsMessage;
+
+  smsList = [smsRecord, ...smsList];
+  saveSms(smsList);
 
   studentsMap[student.roll.toUpperCase()] = student;
   saveStudents(studentsMap);
@@ -283,7 +366,7 @@ app.post('/api/students/approve', (req, res) => {
   entriesList = [newEntry, ...entriesList.filter((e) => e.roll.toUpperCase() !== student!.roll.toUpperCase())];
   saveEntries(entriesList);
 
-  res.json({ success: true, student, entry: newEntry });
+  res.json({ success: true, student, entry: newEntry, sms: smsRecord });
 });
 
 // 5. Get all admitted entries
@@ -298,6 +381,11 @@ app.delete('/api/entries', (req, res) => {
     studentsMap[key].admitted = false;
     delete studentsMap[key].admittedAt;
     delete studentsMap[key].admittedTimestamp;
+    studentsMap[key].isExpired = false;
+    delete studentsMap[key].expiredAt;
+    studentsMap[key].smsSent = false;
+    delete studentsMap[key].smsSentAt;
+    delete studentsMap[key].smsMessage;
   }
   saveStudents(studentsMap);
   saveEntries(entriesList);
@@ -315,8 +403,47 @@ app.get('/api/stats', (req, res) => {
     totalRegistered,
     totalAdmitted,
     totalPending,
-    entriesCount: entriesList.length
+    entriesCount: entriesList.length,
+    smsSentCount: smsList.length
   });
+});
+
+// 8. Get all sent SMS logs
+app.get('/api/sms', (req, res) => {
+  res.json({ smsList, totalSent: smsList.length });
+});
+
+// 9. Send or resend SMS with sender "UDGHOSH"
+app.post('/api/sms/send', (req, res) => {
+  const { phone, studentName, roll, message, scannedAt } = req.body;
+  const timeStr = scannedAt || new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(new Date()).toUpperCase();
+
+  const cleanPhone = phone ? String(phone).trim() : '';
+  const cleanRoll = roll ? String(roll).trim().toUpperCase() : 'N/A';
+  const cleanName = studentName ? String(studentName).trim() : 'Student';
+
+  const smsRecord: SmsRecord = {
+    id: 'SMS-' + Date.now() + '-' + Math.floor(Math.random() * 899 + 100),
+    roll: cleanRoll,
+    studentName: cleanName,
+    phone: cleanPhone,
+    sender: 'udghosh_hjmc_swagtam_by_Aditya',
+    message: message || `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${cleanName}! Aapka registration (${cleanRoll}) ${timeStr} par scan hokar verify ho chuka hai aur Gate Entry ho gayi hai. Pass ab EXPIRE ho gaya hai. Swagatam! - udghosh_hjmc_swagtam_by_Aditya`,
+    sentAt: timeStr,
+    timestamp: Date.now(),
+    status: 'DELIVERED'
+  };
+
+  smsList = [smsRecord, ...smsList];
+  saveSms(smsList);
+
+  res.json({ success: true, sms: smsRecord });
 });
 
 // ================= VITE DEV / PROD SERVER =================

@@ -1,0 +1,24 @@
+[
+  {
+    "id": "SMS-1790937031164-24HJMC01",
+    "roll": "24HJMC01",
+    "studentName": "Aarav Sharma",
+    "phone": "9876543210",
+    "sender": "udghosh_hjmc_swagtam_by_Aditya",
+    "message": "🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste Aarav Sharma! Aapka registration (24HJMC01) QR scan hokar 09:15:30 AM par safalta-purvak verify ho chuka hai aur Gate Entry allow kar di gayi hai. Aapka single-use pass ab EXPIRE ho gaya hai. Swagatam! - udghosh_hjmc_swagtam_by_Aditya",
+    "sentAt": "09:15:30 AM",
+    "timestamp": 1790937031164,
+    "status": "DELIVERED"
+  },
+  {
+    "id": "SMS-1790938831164-24HJMC02",
+    "roll": "24HJMC02",
+    "studentName": "Pooja Verma",
+    "phone": "9812345678",
+    "sender": "udghosh_hjmc_swagtam_by_Aditya",
+    "message": "🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste Pooja Verma! Aapka registration (24HJMC02) QR scan hokar 09:30:12 AM par safalta-purvak verify ho chuka hai aur Gate Entry allow kar di gayi hai. Aapka single-use pass ab EXPIRE ho gaya hai. Swagatam! - udghosh_hjmc_swagtam_by_Aditya",
+    "sentAt": "09:30:12 AM",
+    "timestamp": 1790938831164,
+    "status": "DELIVERED"
+  }
+]

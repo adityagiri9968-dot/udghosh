@@ -268,7 +268,8 @@ export const AdminRegistrationsTab: React.FC<AdminRegistrationsTabProps> = ({
                   <th className="py-3.5 px-4 font-semibold">Roll Number</th>
                   <th className="py-3.5 px-4 font-semibold">Phone Number</th>
                   <th className="py-3.5 px-4 font-semibold">Course</th>
-                  <th className="py-3.5 px-4 font-semibold">Entry Status</th>
+                  <th className="py-3.5 px-4 font-semibold">Pass Expiry Status</th>
+                  <th className="py-3.5 px-4 font-semibold">UDGHOSH SMS</th>
                   <th className="py-3.5 px-4 font-semibold text-right">Action</th>
                 </tr>
               </thead>
@@ -346,17 +347,30 @@ export const AdminRegistrationsTab: React.FC<AdminRegistrationsTabProps> = ({
                       </span>
                     </td>
 
-                    {/* Status */}
+                    {/* Pass Expiry Status */}
                     <td className="py-3.5 px-4">
                       {student.admitted ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Admitted ({student.admittedAt ? formatScanTime(student.admittedAt) : 'Done'})</span>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/40">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-red-400" />
+                          <span>⛔ EXPIRED (Scanned {student.admittedAt ? formatScanTime(student.admittedAt) : 'Done'})</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                           <Clock className="w-3.5 h-3.5" />
-                          <span>Pending (Abhi Nahi Aaye)</span>
+                          <span>✅ ACTIVE (1-Time Use)</span>
+                        </span>
+                      )}
+                    </td>
+
+                    {/* UDGHOSH SMS Status */}
+                    <td className="py-3.5 px-4">
+                      {student.admitted ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[11px] font-bold border border-emerald-500/30">
+                          <span>📲 UDGHOSH Sent</span>
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-500 italic">
+                          Scan par aayega
                         </span>
                       )}
                     </td>
@@ -364,9 +378,8 @@ export const AdminRegistrationsTab: React.FC<AdminRegistrationsTabProps> = ({
                     {/* Action */}
                     <td className="py-3.5 px-4 text-right">
                       {student.admitted ? (
-                        <span className="text-xs text-emerald-400 font-semibold flex items-center justify-end gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Entry Done</span>
+                        <span className="text-xs text-red-400 font-semibold flex items-center justify-end gap-1">
+                          <span>Pass Expired</span>
                         </span>
                       ) : (
                         <button

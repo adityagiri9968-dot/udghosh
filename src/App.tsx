@@ -50,11 +50,18 @@ import {
   BatteryLow,
   Calendar,
   Bell,
-  BellOff
+  BellOff,
+  MessageSquare,
+  Smartphone,
+  Send,
+  SendHorizontal
 } from 'lucide-react';
 import { EntryAnalytics } from './components/EntryAnalytics.tsx';
 import { OwnerSection, StudentRecord } from './components/OwnerSection.tsx';
 import { AdminRegistrationsTab } from './components/AdminRegistrationsTab.tsx';
+import { AdminSmsLogsTab, SmsRecord } from './components/AdminSmsLogsTab.tsx';
+import { PhoneSmsModal } from './components/PhoneSmsModal.tsx';
+import { PassExpiryChecker } from './components/PassExpiryChecker.tsx';
 import { formatScanTime, formatIndianDateTime, formatTimeInHindiWords } from './utils/timeFormat.ts';
 
 export interface EntryRecord {
@@ -88,6 +95,13 @@ interface ScanBannerState {
     registeredAtFormatted?: string;
     firstScanTimeFormatted?: string;
     firstScanTimeHindi?: string;
+    isExpired?: boolean;
+    expiredAt?: string;
+    smsSent?: boolean;
+    smsPhone?: string;
+    smsSender?: string;
+    smsMessage?: string;
+    smsSentAt?: string;
   };
 }
 
@@ -102,6 +116,11 @@ export interface RegisteredStudent {
   admitted?: boolean;
   admittedAt?: string;
   admittedTimestamp?: number;
+  isExpired?: boolean;
+  expiredAt?: string;
+  smsSent?: boolean;
+  smsSentAt?: string;
+  smsMessage?: string;
 }
 
 export default function App() {
@@ -112,7 +131,16 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     return sessionStorage.getItem('fresher_party_admin_logged_in') === 'true';
   });
-  const [adminTab, setAdminTab] = useState<'scanner' | 'registrations' | 'entries'>('scanner');
+  const [adminTab, setAdminTab] = useState<'scanner' | 'registrations' | 'entries' | 'sms'>('scanner');
+  const [smsList, setSmsList] = useState<SmsRecord[]>([]);
+  const [selectedSmsForPreview, setSelectedSmsForPreview] = useState<SmsRecord | null>(null);
+  const [incomingSmsToast, setIncomingSmsToast] = useState<SmsRecord | null>(null);
+
+  // Student Pass Search / Expiry Check state
+  const [passSearchQuery, setPassSearchQuery] = useState<string>('');
+  const [passSearchError, setPassSearchError] = useState<string>('');
+  const [isSearchingPass, setIsSearchingPass] = useState<boolean>(false);
+
   const [showPinModal, setShowPinModal] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState<string>('');
   const [pinError, setPinError] = useState<string>('');
@@ -174,9 +202,10 @@ export default function App() {
   // Synchronize state with backend server so all phones share data in real-time
   const syncWithBackend = async () => {
     try {
-      const [resStudents, resEntries] = await Promise.all([
+      const [resStudents, resEntries, resSms] = await Promise.all([
         fetch('/api/students'),
-        fetch('/api/entries')
+        fetch('/api/entries'),
+        fetch('/api/sms')
       ]);
 
       if (resStudents.ok) {
@@ -196,6 +225,13 @@ export default function App() {
         if (data.entries && Array.isArray(data.entries)) {
           setEntries(data.entries);
           entriesRef.current = data.entries;
+        }
+      }
+
+      if (resSms.ok) {
+        const smsData = await resSms.json();
+        if (smsData.smsList && Array.isArray(smsData.smsList)) {
+          setSmsList(smsData.smsList);
         }
       }
     } catch (e) {
@@ -602,6 +638,70 @@ export default function App() {
       stopSelfieCamera();
     } catch (e) {
       console.error('Selfie capture failed', e);
+    }
+  };
+
+  // Check Pass Status / Lookup Pass by Roll, Phone, or ID
+  const handleCheckPassStatus = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPassSearchError('');
+    const query = passSearchQuery.trim();
+    if (!query) {
+      setPassSearchError('Kripya apna Roll Number ya Phone Number dalein.');
+      return;
+    }
+    setIsSearchingPass(true);
+    try {
+      const cleanUpper = query.toUpperCase();
+      const digitsOnly = query.replace(/\D/g, '');
+
+      let match: RegisteredStudent | undefined = Object.values(registeredStudents).find(
+        (s) =>
+          s.roll.toUpperCase() === cleanUpper ||
+          s.id.toUpperCase() === cleanUpper ||
+          (digitsOnly.length >= 10 && s.phone && s.phone.replace(/\D/g, '') === digitsOnly)
+      );
+
+      if (!match) {
+        const res = await fetch(`/api/students/${encodeURIComponent(query)}`);
+        if (res.ok) {
+          match = await res.json();
+        }
+      }
+
+      if (!match) {
+        setPassSearchError(`Koi pass nahi mila: "${query}". Roll Number ya Phone Number check karein ya naya registration karein.`);
+        return;
+      }
+
+      const qrPayload = {
+        name: match.name,
+        roll: match.roll,
+        phone: match.phone,
+        course: match.course,
+        id: match.id
+      };
+      const qrDataUrl = await QRCode.toDataURL(JSON.stringify(qrPayload), {
+        errorCorrectionLevel: 'H',
+        margin: 2,
+        width: 380,
+        color: { dark: '#0f172a', light: '#ffffff' }
+      });
+
+      setRegisteredData({
+        id: match.id,
+        name: match.name,
+        roll: match.roll,
+        phone: match.phone,
+        course: match.course,
+        photoUrl: match.photoUrl,
+        qrUrl: qrDataUrl
+      });
+      setPassSearchQuery('');
+    } catch {
+      setPassSearchError('Pass dhoondhne mein error aaya. Kripya punah prayas karein.');
+    } finally {
+      setIsSearchingPass(false);
     }
   };
 
@@ -1195,8 +1295,8 @@ export default function App() {
         ? formatIndianDateTime(registeredTimestamp)
         : undefined;
 
-      if (existing || matchedProfile?.admitted) {
-        // DUPLICATE ENTRY - User requested: "scan ke dawran ye batye ki esne pahle hi registration kiyea tha or real time ki kab kiya tha or pahli baar scan kitne bajakar jitne mint par huaa tha"
+      if (existing || matchedProfile?.admitted || matchedProfile?.isExpired) {
+        // EXPIRED PASS / DUPLICATE ENTRY - User requested: "espar ek baar pass scan hone ke baad expire ho jaaye aur scan karne par uske phone par number par sms chala jaaye udgosh naam se"
         const firstScanRaw =
           existing?.scannedAt ||
           matchedProfile?.admittedAt ||
@@ -1204,13 +1304,14 @@ export default function App() {
           matchedProfile?.admittedTimestamp;
         const prevTime = formatScanTime(firstScanRaw);
         const firstScanHindi = formatTimeInHindiWords(firstScanRaw);
+        const prevSms = smsList.find((s) => s.roll.toUpperCase() === scannedRoll);
 
         playDuplicateWarningSound();
         triggerVibration([300, 100, 300]);
         setScanBanner({
           type: 'duplicate',
-          message: '⚠️ Pehle hi entry ho chuki hai!',
-          subMessage: `Pehle registration kiya tha: ${registeredAtFormatted || 'Registration Verified'} • Pehli baar scan: ${firstScanHindi}`,
+          message: '⛔ PASS EXPIRED (1 Baar Scan Ho Chuka Hai)',
+          subMessage: `Yeh pass pehle scan hokar EXPIRE ho chuka hai! Pehli baar scan: ${firstScanHindi} (${prevTime}) • Ek pass sirf ek baar chalega.`,
           details: {
             id: studentIdFound,
             name: existing?.name || studentNameScanned,
@@ -1225,10 +1326,16 @@ export default function App() {
             registeredAt: registeredTimestamp,
             registeredAtFormatted,
             firstScanTimeFormatted: prevTime,
-            firstScanTimeHindi: firstScanHindi
+            firstScanTimeHindi: firstScanHindi,
+            isExpired: true,
+            expiredAt: prevTime,
+            smsSent: true,
+            smsPhone: studentPhoneFound,
+            smsSender: 'UDGHOSH',
+            smsMessage: prevSms?.message || `🎉 UDGHOSH 2026: Namaste ${existing?.name || studentNameScanned}! Aapka fresher party pass (${scannedRoll}) verify hokar gate entry ho chuki hai aur yeh pass ab EXPIRE ho gaya hai.`
           }
         });
-        setAiBotLastAction(`Duplicate Blocked: ${studentNameScanned} (${scannedRoll}) • 1st Scan: ${prevTime}`);
+        setAiBotLastAction(`EXPIRED PASS Blocked: ${studentNameScanned} (${scannedRoll}) • 1st Scan: ${prevTime}`);
       } else {
         // VALID PASS -> REQUIRE APPROVAL BUTTON (User: "admin ke scan kanre ke baaad aporve ka button ho")
         const scanTimeNow = formatScanTime();
@@ -1239,8 +1346,8 @@ export default function App() {
           type: 'pending_approval',
           message: `📸 Pass Scan Ho Gaya: ${studentNameScanned}`,
           subMessage: isPreRegistered
-            ? `Pehle hi registration kiya tha: ${registeredAtFormatted} • Pehli baar scan abhi ${scanTimeNowHindi} par ho raha hai`
-            : `Pehli baar scan: ${scanTimeNowHindi} • Details verify karke "Approve Entry" dabayein`,
+            ? `Pehle hi registration kiya tha: ${registeredAtFormatted} • Pehli baar scan abhi ${scanTimeNowHindi} par ho raha hai. Approve karte hi pass EXPIRE ho jayega aur UDGHOSH SMS chala jayega.`
+            : `Pehli baar scan: ${scanTimeNowHindi} • Details verify karke "Approve Entry" dabayein (Pass will EXPIRE & UDGHOSH SMS will be sent)`,
           details: {
             id: studentIdFound,
             name: studentNameScanned,
@@ -1253,7 +1360,9 @@ export default function App() {
             registeredAt: registeredTimestamp,
             registeredAtFormatted,
             firstScanTimeFormatted: scanTimeNow,
-            firstScanTimeHindi: scanTimeNowHindi
+            firstScanTimeHindi: scanTimeNowHindi,
+            smsPhone: studentPhoneFound,
+            smsSender: 'udghosh_hjmc_swagtam_by_Aditya'
           }
         });
         setAiBotLastAction(`Waiting for Approval: ${studentNameScanned} (${scannedRoll})`);
@@ -1313,9 +1422,10 @@ export default function App() {
       approvedBy: 'Gate Admin'
     };
 
-    // 1. Post to backend server so other devices see the approval with exact IST time!
+    // 1. Post to backend server so other devices see the approval with exact IST time and dispatch UDGHOSH SMS!
+    let backendSms: SmsRecord | undefined;
     try {
-      await fetch('/api/students/approve', {
+      const res = await fetch('/api/students/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1326,9 +1436,36 @@ export default function App() {
           timestamp: nowMs
         })
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.sms) {
+          backendSms = data.sms;
+        }
+      }
     } catch (e) {
       console.warn('Backend approval sync error', e);
     }
+
+    const dispatchedSms: SmsRecord = backendSms || {
+      id: 'SMS-' + nowMs + '-' + cleanRoll,
+      roll: cleanRoll,
+      studentName: cleanName,
+      phone: cleanPhone,
+      sender: 'udghosh_hjmc_swagtam_by_Aditya',
+      message: `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${cleanName}! Aapka fresher party registration (${cleanRoll}) ${timeStr} par scan hokar verify ho chuka hai aur Gate Entry ho gayi hai. Pass ab EXPIRE ho gaya hai (Single-Use Completed). Swagatam! - udghosh_hjmc_swagtam_by_Aditya`,
+      sentAt: timeStr,
+      timestamp: nowMs,
+      status: 'DELIVERED'
+    };
+
+    // Update local smsList
+    setSmsList((prev) => [dispatchedSms, ...prev.filter((s) => s.id !== dispatchedSms.id)]);
+
+    // Trigger on-screen floating notification
+    setIncomingSmsToast(dispatchedSms);
+    setTimeout(() => {
+      setIncomingSmsToast((cur) => (cur?.id === dispatchedSms.id ? null : cur));
+    }, 7000);
 
     // 2. Play celebratory sound & confetti
     playSuccessSound();
@@ -1343,7 +1480,7 @@ export default function App() {
     entriesRef.current = [newRecord, ...entriesRef.current.filter((e) => e.roll.toUpperCase() !== cleanRoll)];
     setEntries((prev) => [newRecord, ...prev.filter((e) => e.roll.toUpperCase() !== cleanRoll)]);
 
-    // 4. Update student record locally
+    // 4. Update student record locally with expired and SMS status
     setRegisteredStudents((prev) => {
       const match = prev[cleanRoll];
       if (match) {
@@ -1353,18 +1490,23 @@ export default function App() {
             ...match,
             admitted: true,
             admittedAt: timeStr,
-            admittedTimestamp: nowMs
+            admittedTimestamp: nowMs,
+            isExpired: true,
+            expiredAt: timeStr,
+            smsSent: true,
+            smsSentAt: timeStr,
+            smsMessage: dispatchedSms.message
           }
         };
       }
       return prev;
     });
 
-    // 5. Update banner to confirmed
+    // 5. Update banner to confirmed & expired with UDGHOSH SMS details
     setScanBanner({
       type: 'success',
-      message: `✅ Entry Safalta-purvak Approved! Welcome, ${cleanName}`,
-      subMessage: `Roll: ${cleanRoll} • Course: ${cleanCourse} • Admitted at ${timeStr}`,
+      message: `✅ Entry Approved! Pass Ab EXPIRE Ho Gaya`,
+      subMessage: `Roll: ${cleanRoll} • Gate Entry Confirmed at ${timeStr} • SMS Sent via UDGHOSH to +91 ${cleanPhone}`,
       details: {
         id: details.id,
         name: cleanName,
@@ -1372,10 +1514,17 @@ export default function App() {
         phone: cleanPhone,
         course: cleanCourse,
         time: timeStr,
-        photoUrl: details.photoUrl
+        photoUrl: details.photoUrl,
+        isExpired: true,
+        expiredAt: timeStr,
+        smsSent: true,
+        smsPhone: cleanPhone,
+        smsSender: 'UDGHOSH',
+        smsMessage: dispatchedSms.message,
+        smsSentAt: timeStr
       }
     });
-    setAiBotLastAction(`Approved & Admitted: ${cleanName} (${cleanRoll})`);
+    setAiBotLastAction(`Approved & Pass Expired: ${cleanName} (${cleanRoll}) • SMS Sent via UDGHOSH`);
   };
 
   useEffect(() => {
@@ -1822,9 +1971,11 @@ export default function App() {
           <OwnerSection
             students={Object.values(registeredStudents)}
             entries={entries}
+            smsList={smsList}
             onRefresh={syncWithBackend}
             onLogout={handleOwnerLogout}
             onPreviewPhoto={setSelectedPreviewPhoto}
+            onOpenPhonePreview={(s) => setSelectedSmsForPreview(s)}
           />
         ) : currentView === 'student' ? (
           /* ========================================================= */
@@ -2074,70 +2225,164 @@ export default function App() {
                 </p>
 
                 {/* Pass Ticket Box */}
-                <div className="bg-slate-900/90 rounded-2xl p-5 border border-slate-700/80 mb-6 text-left relative">
-                  <div className="flex items-center gap-3.5 mb-4 pb-3 border-b border-slate-800">
-                    {registeredData.photoUrl ? (
-                      <div className="relative w-16 h-16 sm:w-18 sm:h-18 rounded-xl overflow-hidden border-2 border-pink-500 shadow-lg shrink-0">
-                        <img
-                          src={registeredData.photoUrl}
-                          alt={registeredData.name}
-                          className="w-full h-full object-cover"
-                        />
-                        <span className="absolute bottom-0 inset-x-0 bg-pink-600 text-[8px] font-bold text-white text-center py-0.5">
-                          ID PHOTO
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex flex-col items-center justify-center text-slate-400 shrink-0">
-                        <User className="w-7 h-7 text-slate-500" />
-                        <span className="text-[8px] text-slate-400">No Photo</span>
-                      </div>
-                    )}
+                {(() => {
+                  const cleanStudentRoll = registeredData.roll.trim().toUpperCase();
+                  const studentEntryMatch = entries.find((e) => e.roll.trim().toUpperCase() === cleanStudentRoll);
+                  const studentRegistryMatch = registeredStudents[cleanStudentRoll];
+                  const isPassExpired = Boolean(
+                    studentEntryMatch ||
+                    studentRegistryMatch?.admitted ||
+                    studentRegistryMatch?.isExpired
+                  );
+                  const expiredTimeStr =
+                    studentEntryMatch?.scannedAt ||
+                    studentRegistryMatch?.admittedAt ||
+                    (studentEntryMatch?.timestamp ? formatScanTime(studentEntryMatch.timestamp) : undefined);
+                  const matchingSms = smsList.find((s) => s.roll.trim().toUpperCase() === cleanStudentRoll);
 
-                    <div className="flex-1 min-w-0">
-                      <span className="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Student Name</span>
-                      <span className="text-lg font-bold text-white truncate block">{registeredData.name}</span>
-                      <div className="flex items-center gap-2 mt-1 flex-wrap">
-                        <span className="px-2 py-0.5 rounded bg-pink-500/20 text-pink-400 font-mono font-bold text-xs border border-pink-500/30">
-                          {registeredData.roll}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold text-xs border border-purple-500/30">
-                          {registeredData.course || 'HJMC'}
-                        </span>
-                        {registeredData.phone && (
-                          <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
-                            <Phone className="w-3 h-3" />
-                            {registeredData.phone}
-                          </span>
+                  return (
+                    <div className="bg-slate-900/90 rounded-2xl p-5 border border-slate-700/80 mb-6 text-left relative overflow-hidden">
+                      {/* 1. Pass Status Header */}
+                      {isPassExpired ? (
+                        <div className="mb-4 p-3.5 rounded-xl bg-red-950/85 border-2 border-red-500 text-center shadow-lg animate-in fade-in">
+                          <div className="flex items-center justify-center gap-2 text-red-200 font-extrabold text-sm sm:text-base">
+                            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 animate-bounce" />
+                            <span>⛔ PASS STATUS: EXPIRED (1-TIME USE COMPLETED)</span>
+                          </div>
+                          <p className="text-xs text-red-200 mt-1 font-medium">
+                            Yeh pass gate par 1 baar scan hokar <strong className="text-white underline">EXPIRE</strong> ho chuka hai. Scan Time: <strong className="text-amber-300 font-mono">{expiredTimeStr || 'Verified'}</strong>. Ek pass sirf ek baar chalega!
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="mb-4 p-3 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-center shadow-sm">
+                          <div className="flex items-center justify-center gap-2 text-emerald-300 font-extrabold text-xs sm:text-sm">
+                            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                            <span>✅ PASS STATUS: ACTIVE (1-Time Single Use)</span>
+                          </div>
+                          <p className="text-[11px] text-emerald-200 mt-0.5">
+                            Gate par 1 baar scan hone ke baad yeh pass EXPIRE ho jayega aur aapke number (+91 {registeredData.phone}) par "UDGHOSH" naam se SMS confirmation aayega.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-3.5 mb-4 pb-3 border-b border-slate-800">
+                        {registeredData.photoUrl ? (
+                          <div className="relative w-16 h-16 sm:w-18 sm:h-18 rounded-xl overflow-hidden border-2 border-pink-500 shadow-lg shrink-0">
+                            <img
+                              src={registeredData.photoUrl}
+                              alt={registeredData.name}
+                              className="w-full h-full object-cover"
+                            />
+                            <span className="absolute bottom-0 inset-x-0 bg-pink-600 text-[8px] font-bold text-white text-center py-0.5">
+                              ID PHOTO
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex flex-col items-center justify-center text-slate-400 shrink-0">
+                            <User className="w-7 h-7 text-slate-500" />
+                            <span className="text-[8px] text-slate-400">No Photo</span>
+                          </div>
                         )}
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          ID: {registeredData.id}
+
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 block font-semibold">Student Name</span>
+                          <span className="text-lg font-bold text-white truncate block">{registeredData.name}</span>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span className="px-2 py-0.5 rounded bg-pink-500/20 text-pink-400 font-mono font-bold text-xs border border-pink-500/30">
+                              {registeredData.roll}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold text-xs border border-purple-500/30">
+                              {registeredData.course || 'HJMC'}
+                            </span>
+                            {registeredData.phone && (
+                              <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
+                                <Phone className="w-3 h-3" />
+                                {registeredData.phone}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ID: {registeredData.id}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 2. QR Image Box with EXPIRED overlay stamp if scanned */}
+                      <div className="bg-white p-4 rounded-xl shadow-inner flex flex-col items-center justify-center my-2 relative overflow-hidden">
+                        <img
+                          src={registeredData.qrUrl}
+                          alt="Student Entry QR Code"
+                          className={`w-48 h-48 sm:w-56 sm:h-56 object-contain transition-all ${
+                            isPassExpired ? 'opacity-30 grayscale filter' : ''
+                          }`}
+                        />
+
+                        {isPassExpired && (
+                          <div className="absolute inset-0 bg-red-950/80 backdrop-blur-[2px] flex flex-col items-center justify-center p-4 text-center animate-in fade-in">
+                            <div className="p-2.5 rounded-full bg-red-600/30 border-2 border-red-500 text-red-300 mb-2 shadow-lg">
+                              <Lock className="w-8 h-8" />
+                            </div>
+                            <span className="text-sm sm:text-base font-black text-white tracking-widest uppercase bg-red-600 px-3.5 py-1.5 rounded-lg shadow-xl border border-red-400 -rotate-3">
+                              ⛔ EXPIRED / USED
+                            </span>
+                            <span className="text-xs font-bold text-red-200 mt-2 bg-black/60 px-2.5 py-1 rounded">
+                              Gate Entry Already Completed
+                            </span>
+                            <span className="text-[11px] text-amber-300 font-mono mt-1 font-semibold">
+                              Scanned: {expiredTimeStr || 'Verified'}
+                            </span>
+                          </div>
+                        )}
+
+                        <span className="text-[10px] text-slate-500 font-mono mt-1 font-semibold">
+                          PASS ID: {registeredData.id}
                         </span>
                       </div>
-                    </div>
-                  </div>
 
-                  {/* QR Image Box */}
-                  <div className="bg-white p-4 rounded-xl shadow-inner flex flex-col items-center justify-center my-2">
-                    <img
-                      src={registeredData.qrUrl}
-                      alt="Student Entry QR Code"
-                      className="w-48 h-48 sm:w-56 sm:h-56 object-contain"
-                    />
-                    <span className="text-[10px] text-slate-500 font-mono mt-1 font-semibold">
-                      PASS ID: {registeredData.id}
-                    </span>
-                  </div>
+                      {/* 3. UDGHOSH Portal SMS Notification Box */}
+                      <div className="mt-3.5 p-3.5 rounded-xl bg-gradient-to-r from-purple-950/60 via-slate-900 to-indigo-950/60 border border-purple-500/40 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between flex-wrap gap-1">
+                          <div className="flex items-center gap-1.5 text-white font-bold">
+                            <MessageSquare className="w-4 h-4 text-emerald-400" />
+                            <span>📲 Official SMS: <strong className="font-mono text-pink-300 font-bold">udghosh_hjmc_swagtam_by_Aditya</strong></span>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            isPassExpired
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          }`}>
+                            {isPassExpired ? '✅ DELIVERED' : '⏳ On Gate Scan'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          {isPassExpired
+                            ? `Aapke phone number (+91 ${registeredData.phone}) par sender "udghosh_hjmc_swagtam_by_Aditya" se gate entry aur single-use pass expiry ka official portal SMS deliver ho chuka hai.`
+                            : `Gate par scan hote hi aapke mobile (+91 ${registeredData.phone}) par "udghosh_hjmc_swagtam_by_Aditya" naam se portal OTP style SMS aayega aur pass expire ho jayega.`}
+                        </p>
+                        {matchingSms && (
+                          <div className="pt-1 flex items-center gap-2">
+                            <button
+                              onClick={() => setSelectedSmsForPreview(matchingSms)}
+                              className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-[10px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+                            >
+                              <Smartphone className="w-3.5 h-3.5 text-pink-300" />
+                              <span>📱 View Phone SMS Notification</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
-                  {/* Prominent Mandatory Instruction */}
-                  <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-2.5">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-semibold block">Zaroori Soochana:</span>
-                      Is QR code ka screenshot le lein, auditorium entry gate par yehi dikhana hoga.
+                      {/* Prominent Mandatory Instruction */}
+                      <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-2.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-semibold block">Zaroori Soochana:</span>
+                          Ek pass sirf ek baar chalega. Entry gate par scan hone ke baad pass expire ho jayega.
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Action Buttons */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2230,6 +2475,18 @@ export default function App() {
                 </button>
 
                 <button
+                  onClick={() => setAdminTab('sms')}
+                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    adminTab === 'sms'
+                      ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                >
+                  <MessageSquare className="w-4 h-4 text-emerald-400" />
+                  <span>UDGHOSH SMS ({smsList.length})</span>
+                </button>
+
+                <button
                   onClick={handleAdminLogout}
                   title="Admin Logout"
                   className="p-2.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
@@ -2264,9 +2521,38 @@ export default function App() {
               />
             )}
 
+            {/* TAB: UDGHOSH OFFICIAL SMS DISPATCH LOGS */}
+            {adminTab === 'sms' && (
+              <AdminSmsLogsTab
+                smsList={smsList}
+                onRefresh={syncWithBackend}
+                onOpenPhonePreview={(sms) => setSelectedSmsForPreview(sms)}
+              />
+            )}
+
             {/* TAB 1: SCANNER TAB */}
             {adminTab === 'scanner' && (
               <div className="space-y-5">
+                {/* 🔍 ADMIN TOOL: PEHLE SE REGISTER KIYA HAI? PASS & EXPIRY CHECK KAREIN */}
+                <PassExpiryChecker
+                  students={Object.values(registeredStudents)}
+                  entries={entries}
+                  smsList={smsList}
+                  onApproveStudent={(student) =>
+                    handleApproveEntry({
+                      id: student.id,
+                      name: student.name,
+                      roll: student.roll,
+                      phone: student.phone,
+                      course: student.course,
+                      photoUrl: student.photoUrl
+                    })
+                  }
+                  onPreviewPhoto={setSelectedPreviewPhoto}
+                  onOpenPhonePreview={(sms) => setSelectedSmsForPreview(sms)}
+                  variant="admin"
+                />
+
                 {/* 🤖 AI Automatic Bot Sentinel Banner */}
                 <div className="glass-card rounded-2xl p-4 sm:p-5 border border-indigo-500/40 bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/40 shadow-xl relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-72 h-32 bg-gradient-to-l from-purple-500/10 via-pink-500/10 to-transparent pointer-events-none rounded-full blur-2xl" />
@@ -2506,6 +2792,126 @@ export default function App() {
                                     : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                                 }`}>
                                   {scanBanner.type === 'duplicate' ? 'Duplicate Alert' : '1st Scan Verified'}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* 3. Duplicate / Expired Alert Box (User requested pass expiry) */}
+                            {scanBanner.type === 'duplicate' && (
+                              <div className="p-3 rounded-xl bg-red-950/90 border-2 border-red-500 text-xs flex items-start gap-2.5 shadow-lg animate-in fade-in">
+                                <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5 animate-bounce" />
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-extrabold text-sm text-white uppercase tracking-wider">
+                                      ⛔ PASS EXPIRED (SINGLE-USE PASS)
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40">
+                                      Pass Expire Ho Chuka Hai
+                                    </span>
+                                  </div>
+                                  <p className="text-red-200">
+                                    Yeh pass pehle hi 1 baar scan hokar <strong>EXPIRE</strong> ho chuka hai! Ek pass sirf ek baar chalega. Dobara entry allowed nahi hai.
+                                  </p>
+                                  {scanBanner.details.phone && (
+                                    <div className="text-[11px] text-emerald-300 font-mono flex items-center gap-1.5 pt-1">
+                                      <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span>UDGHOSH SMS notification already sent to: +91 {scanBanner.details.phone}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 4. Success: Pass Expired Notice & UDGHOSH SMS Notification Card */}
+                            {scanBanner.type === 'success' && (
+                              <div className="space-y-2">
+                                <div className="p-2.5 rounded-xl bg-amber-950/70 border border-amber-500/50 text-xs flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="flex items-center gap-2">
+                                    <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+                                    <div>
+                                      <span className="font-bold text-white block">
+                                        ⛔ Pass Status: EXPIRED (Single-Use Completed)
+                                      </span>
+                                      <span className="text-[11px] text-amber-200">
+                                        Gate entry verify ho chuki hai. Yeh pass ab dobara scan karne par EXPIRED batayega.
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                    EXPIRED
+                                  </span>
+                                </div>
+
+                                {scanBanner.details.phone && (
+                                  <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-950/90 via-slate-900 to-purple-950/90 border border-emerald-500/50 text-xs space-y-2">
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                                          <MessageSquare className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-extrabold text-white text-xs">
+                                              📲 SMS Sent via <strong className="text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-300 font-mono">udghosh_hjmc_swagtam_by_Aditya</strong>
+                                            </span>
+                                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                              DELIVERED
+                                            </span>
+                                          </div>
+                                          <span className="text-[11px] text-emerald-300 font-mono">
+                                            To: +91 {scanBanner.details.phone} ({scanBanner.details.name})
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          onClick={() => {
+                                            const smsObj: SmsRecord = {
+                                              id: 'SMS-' + Date.now(),
+                                              roll: scanBanner.details?.roll || '',
+                                              studentName: scanBanner.details?.name || 'Student',
+                                              phone: scanBanner.details?.phone || '',
+                                              sender: 'udghosh_hjmc_swagtam_by_Aditya',
+                                              message: scanBanner.details?.smsMessage || `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${scanBanner.details?.name}! Aapka fresher party registration (${scanBanner.details?.roll}) scan hokar verify ho chuka hai aur Gate Entry ho gayi hai. Pass ab EXPIRE ho gaya hai (Single-Use Completed). Swagatam! - udghosh_hjmc_swagtam_by_Aditya`,
+                                              sentAt: scanBanner.details?.time || formatScanTime(),
+                                              timestamp: Date.now(),
+                                              status: 'DELIVERED'
+                                            };
+                                            setSelectedSmsForPreview(smsObj);
+                                          }}
+                                          className="px-2.5 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
+                                        >
+                                          <Smartphone className="w-3.5 h-3.5 text-pink-300" />
+                                          <span>📱 View Phone SMS</span>
+                                        </button>
+                                        <a
+                                          href={`sms:${scanBanner.details.phone}?body=${encodeURIComponent(
+                                            scanBanner.details?.smsMessage || `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${scanBanner.details?.name}! Aapka pass scan hokar verify ho chuka hai aur ab EXPIRE ho gaya hai.`
+                                          )}`}
+                                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition"
+                                        >
+                                          <Send className="w-3.5 h-3.5 text-emerald-400" />
+                                          <span>Open in SMS App</span>
+                                        </a>
+                                      </div>
+                                    </div>
+
+                                    <div className="p-2 rounded-lg bg-black/40 border border-white/10 text-[11px] text-slate-300 font-sans">
+                                      <span className="text-slate-400 font-semibold block text-[10px] uppercase font-mono">Official Portal Message Sent (udghosh_hjmc_swagtam_by_Aditya):</span>
+                                      "{scanBanner.details.smsMessage || `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${scanBanner.details.name}! Aapka registration (${scanBanner.details.roll}) scan hokar verify ho chuka hai aur ab EXPIRE ho gaya hai. Gate entry confirmed! Swagatam! - udghosh_hjmc_swagtam_by_Aditya`}"
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* 5. Pending Approval Notice */}
+                            {scanBanner.type === 'pending_approval' && (
+                              <div className="p-2.5 rounded-xl bg-indigo-950/70 border border-indigo-500/40 text-xs flex items-center gap-2">
+                                <Smartphone className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <span className="text-indigo-200">
+                                  ⚡ <strong>Single-Use Expiry Rule:</strong> Approve karte hi pass turant <strong>EXPIRE</strong> ho jayega aur student ke mobile (+91 {scanBanner.details.phone || 'N/A'}) par <strong>"udghosh_hjmc_swagtam_by_Aditya"</strong> naam se portal OTP style automated SMS chala jayega.
                                 </span>
                               </div>
                             )}
@@ -3531,6 +3937,78 @@ export default function App() {
                 Close Preview
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* 📱 SMARTPHONE SMS SIMULATION MODAL (UDGHOSH SENDER)       */}
+      {/* ========================================================= */}
+      {selectedSmsForPreview && (
+        <PhoneSmsModal
+          sms={selectedSmsForPreview}
+          onClose={() => setSelectedSmsForPreview(null)}
+        />
+      )}
+
+      {/* ========================================================= */}
+      {/* 🔔 FLOATING REAL-TIME UDGHOSH SMS TOAST NOTIFICATION       */}
+      {/* ========================================================= */}
+      {incomingSmsToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full px-4 animate-in slide-in-from-top-6 duration-300 pointer-events-auto">
+          <div className="bg-slate-950/95 backdrop-blur-md rounded-2xl p-4 border-2 border-emerald-500/80 shadow-2xl shadow-emerald-950/80 text-white flex items-start justify-between gap-3 ring-4 ring-emerald-500/20">
+            <div className="flex items-start gap-3 flex-1 min-w-0">
+              <div className="relative shrink-0 mt-0.5">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-600 via-purple-600 to-indigo-600 flex items-center justify-center text-white font-extrabold text-xs shadow-md">
+                  UD
+                </div>
+                <span className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-emerald-500 border-2 border-slate-900" />
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-extrabold text-[11px] text-white uppercase tracking-wider font-mono">
+                    💬 SMS FROM udghosh_hjmc_swagtam_by_Aditya
+                  </span>
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    DELIVERED
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-400 font-mono block">
+                  To: +91 {incomingSmsToast.phone} ({incomingSmsToast.studentName})
+                </span>
+                <p className="text-xs text-slate-200 mt-1 line-clamp-2">
+                  "{incomingSmsToast.message}"
+                </p>
+                <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => {
+                      setSelectedSmsForPreview(incomingSmsToast);
+                      setIncomingSmsToast(null);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-purple-600/40 hover:bg-purple-600 text-purple-200 border border-purple-500/40 text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <Smartphone className="w-3 h-3 text-pink-300" />
+                    <span>📱 View Phone SMS</span>
+                  </button>
+                  <a
+                    href={`sms:${incomingSmsToast.phone}?body=${encodeURIComponent(incomingSmsToast.message)}`}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600/40 hover:bg-emerald-600 text-emerald-200 border border-emerald-500/40 text-[10px] font-bold flex items-center gap-1 transition"
+                  >
+                    <Send className="w-3 h-3 text-emerald-300" />
+                    <span>Open in SMS App</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setIncomingSmsToast(null)}
+              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition shrink-0 cursor-pointer"
+              title="Dismiss Notification"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}

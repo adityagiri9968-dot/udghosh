@@ -21,9 +21,13 @@ import {
   Ticket,
   Calendar,
   Layers,
-  FileSpreadsheet
+  FileSpreadsheet,
+  MessageSquare,
+  Smartphone
 } from 'lucide-react';
 import { formatScanTime, formatIndianDateTime, formatTimeInHindiWords } from '../utils/timeFormat.ts';
+import { AdminSmsLogsTab, SmsRecord } from './AdminSmsLogsTab.tsx';
+import { PassExpiryChecker } from './PassExpiryChecker.tsx';
 
 export interface StudentRecord {
   id: string;
@@ -36,6 +40,11 @@ export interface StudentRecord {
   admitted?: boolean;
   admittedAt?: string;
   admittedTimestamp?: number;
+  isExpired?: boolean;
+  expiredAt?: string;
+  smsSent?: boolean;
+  smsSentAt?: string;
+  smsMessage?: string;
 }
 
 export interface EntryRecord {
@@ -53,19 +62,23 @@ export interface EntryRecord {
 interface OwnerSectionProps {
   students: StudentRecord[];
   entries: EntryRecord[];
+  smsList?: SmsRecord[];
   onRefresh: () => Promise<void> | void;
   onLogout: () => void;
   onPreviewPhoto: (photo: { url: string; name: string; roll: string }) => void;
+  onOpenPhonePreview?: (sms: SmsRecord) => void;
 }
 
 export const OwnerSection: React.FC<OwnerSectionProps> = ({
   students,
   entries,
+  smsList = [],
   onRefresh,
   onLogout,
-  onPreviewPhoto
+  onPreviewPhoto,
+  onOpenPhonePreview = () => {}
 }) => {
-  const [activeTab, setActiveTab] = useState<'master' | 'registrations' | 'entries'>('master');
+  const [activeTab, setActiveTab] = useState<'master' | 'registrations' | 'entries' | 'sms'>('master');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'admitted' | 'pending'>('all');
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -397,6 +410,16 @@ export const OwnerSection: React.FC<OwnerSectionProps> = ({
         </div>
       </div>
 
+      {/* 🔍 OWNER TOOL: PEHLE SE REGISTER KIYA HAI? PASS & EXPIRY CHECK KAREIN */}
+      <PassExpiryChecker
+        students={students}
+        entries={entries}
+        smsList={smsList}
+        onPreviewPhoto={onPreviewPhoto}
+        onOpenPhonePreview={onOpenPhonePreview}
+        variant="owner"
+      />
+
       {/* Navigation Tabs (Master Overview, All Registrations, All Gate Entries) */}
       <div className="glass-card rounded-2xl p-2 border border-slate-700/80 flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap bg-slate-900/80">
         <div className="flex items-center gap-1.5 w-full sm:w-auto">
@@ -434,6 +457,18 @@ export const OwnerSection: React.FC<OwnerSectionProps> = ({
           >
             <CheckCircle2 className="w-4 h-4 text-emerald-300" />
             <span>Abhi Tak Ki Entries ({entries.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('sms')}
+            className={`flex-1 sm:flex-initial py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+              activeTab === 'sms'
+                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-600/30'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 text-emerald-300" />
+            <span>UDGHOSH SMS Logs ({smsList.length})</span>
           </button>
         </div>
 
@@ -545,6 +580,8 @@ export const OwnerSection: React.FC<OwnerSectionProps> = ({
                     <th className="py-3.5 px-4 font-semibold">Course</th>
                     <th className="py-3.5 px-4 font-semibold">Registration Time</th>
                     <th className="py-3.5 px-4 font-semibold">Gate Entry Status</th>
+                    <th className="py-3.5 px-4 font-semibold">Pass Expiry Status</th>
+                    <th className="py-3.5 px-4 font-semibold">UDGHOSH SMS</th>
                     <th className="py-3.5 px-4 font-semibold">Gate Entry Time</th>
                   </tr>
                 </thead>
@@ -643,6 +680,30 @@ export const OwnerSection: React.FC<OwnerSectionProps> = ({
                             <Clock className="w-3.5 h-3.5 text-amber-400" />
                             <span>Baaki (Nahi Aaye)</span>
                           </span>
+                        )}
+                      </td>
+
+                      {/* Pass Expiry Status (Single-Use Rule) */}
+                      <td className="py-3.5 px-4">
+                        {student.admitted ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/40">
+                            <span>⛔ EXPIRED</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                            <span>✅ ACTIVE (1-Time)</span>
+                          </span>
+                        )}
+                      </td>
+
+                      {/* UDGHOSH SMS Status */}
+                      <td className="py-3.5 px-4">
+                        {student.admitted ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[11px] font-bold border border-emerald-500/30">
+                            <span>📲 Sent</span>
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-500 italic">Waiting</span>
                         )}
                       </td>
 
@@ -956,6 +1017,17 @@ export const OwnerSection: React.FC<OwnerSectionProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 4: UDGHOSH OFFICIAL SMS LOGS & AUDIT TRAIL             */}
+      {/* ========================================================= */}
+      {activeTab === 'sms' && (
+        <AdminSmsLogsTab
+          smsList={smsList}
+          onRefresh={onRefresh}
+          onOpenPhonePreview={onOpenPhonePreview}
+        />
       )}
     </div>
   );
