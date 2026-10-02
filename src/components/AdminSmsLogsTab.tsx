@@ -367,6 +367,15 @@ export const AdminSmsLogsTab: React.FC<AdminSmsLogsTabProps> = ({
                           )}
                         </button>
                         <a
+                          href={`https://wa.me/91${sms.phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(sms.message)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Direct WhatsApp par bhejein"
+                          className="p-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 border border-emerald-500/40 transition"
+                        >
+                          <span className="text-xs">💬</span>
+                        </a>
+                        <a
                           href={`sms:${sms.phone}?body=${encodeURIComponent(sms.message)}`}
                           title="Open in native mobile SMS app"
                           className="p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 transition"

@@ -681,6 +681,10 @@ app.post('/api/send-sms', async (req, res) => {
     saveStudents(studentsMap);
   }
 
+  // Build WhatsApp text
+  const waMessage = `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${cleanName}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। आपका Entry Pass QR Code जनरेट हो चुका है।\n\n🎫 *Roll No:* ${cleanRoll || cleanCourse}\n📚 *Course:* ${cleanCourse}\n📞 *Phone:* ${cleanPhone}\n🛡️ *Pass Status:* ACTIVE (Single-Use Entry Pass)\n\n📌 *Zaroori Soochana:*\n• Entry Gate par ye digital pass dikhana anivarya hai.\n• Gate par scan hote hi pass expire ho jayega. Ek pass sirf ek baar chalega!\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`;
+  const directWaUrl = `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(waMessage)}`;
+
   // Dispatch via real Twilio / Fast2SMS gateway
   const gatewayResult = await dispatchSmsViaGateway(cleanPhone, smsBody, cleanName, cleanRoll);
   console.log(`[API /api/send-sms] Automatic SMS sent to ${cleanPhone}:`, gatewayResult);
@@ -691,8 +695,68 @@ app.post('/api/send-sms', async (req, res) => {
     sms: smsRecord,
     gatewayResult,
     provider: gatewayResult.provider,
-    nativeSmsUrl: `sms:+91${cleanPhone}?body=${encodeURIComponent(smsBody)}`
+    nativeSmsUrl: `sms:+91${cleanPhone}?body=${encodeURIComponent(smsBody)}`,
+    whatsappUrl: directWaUrl
   });
+});
+
+// 8c. Direct WhatsApp Route: POST /api/whatsapp/send
+app.post('/api/whatsapp/send', async (req, res) => {
+  const { phoneNumber, phone, studentName, roll, course, message } = req.body;
+  const rawNumber = phoneNumber || phone || '';
+  const cleanPhone = String(rawNumber).replace(/\D/g, '').slice(-10);
+
+  if (!cleanPhone || cleanPhone.length !== 10) {
+    return res.status(400).json({
+      success: false,
+      error: 'Kripya 10-digit valid phone number dalein (e.g. 9876543210)'
+    });
+  }
+
+  const cleanName = studentName ? String(studentName).trim() : 'Student';
+  const cleanRoll = roll ? String(roll).trim().toUpperCase() : 'HJMC';
+  const cleanCourse = course ? String(course).trim().toUpperCase() : 'HJMC';
+
+  const defaultWaMessage = `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Portal Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${cleanName}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। आपका Entry Pass QR Code जनरेट हो चुका है।\n\n🎫 *Roll No:* ${cleanRoll}\n📚 *Course:* ${cleanCourse}\n📞 *Phone:* ${cleanPhone}\n🛡️ *Pass Status:* ACTIVE (Single-Use Entry Pass)\n\n📌 *Zaroori Soochana:*\n• Entry Gate par ye digital pass dikhana anivarya hai.\n• Gate par scan hote hi pass expire ho jayega. Ek pass sirf 1 baar chalega!\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`;
+
+  const waBody = message || defaultWaMessage;
+  const directWaUrl = `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(waBody)}`;
+
+  // Also try Twilio WhatsApp if configured
+  const config = loadSmsConfig();
+  const twilioSid = config.twilioAccountSid || process.env.TWILIO_ACCOUNT_SID;
+  const twilioToken = config.twilioAuthToken || process.env.TWILIO_AUTH_TOKEN;
+  const twilioFrom = config.twilioFromNumber || process.env.TWILIO_PHONE_NUMBER;
+
+  let twilioWaResult: any = null;
+  if (twilioSid && twilioToken && twilioFrom) {
+    try {
+      const client = twilio(twilioSid, twilioToken);
+      const fromFormatted = twilioFrom.startsWith('whatsapp:') ? twilioFrom : `whatsapp:${twilioFrom}`;
+      const toFormatted = `whatsapp:+91${cleanPhone}`;
+      const waRes = await client.messages.create({
+        body: waBody,
+        from: fromFormatted,
+        to: toFormatted
+      });
+      twilioWaResult = { success: true, sid: waRes.sid, status: waRes.status };
+    } catch (e: any) {
+      twilioWaResult = { success: false, error: e?.message };
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: 'WhatsApp message ready',
+    whatsappUrl: directWaUrl,
+    cleanPhone,
+    twilioWaResult
+  });
+});
+
+app.all('/api/whatsapp/send', (req, res) => {
+  res.setHeader('Allow', ['POST']);
+  res.status(405).end(`Method ${req.method} Not Allowed`);
 });
 
 app.all('/api/send-sms', (req, res) => {

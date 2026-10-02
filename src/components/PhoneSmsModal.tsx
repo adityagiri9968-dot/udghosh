@@ -122,30 +122,41 @@ export const PhoneSmsModal: React.FC<PhoneSmsModalProps> = ({ sms, onClose }) =>
             </div>
 
             {/* Bottom Actions Bar inside chassis */}
-            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
-              <button
-                onClick={handleCopy}
-                className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
-              >
-                {copied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy SMS</span>
-                  </>
-                )}
-              </button>
+            <div className="p-3 bg-slate-950 border-t border-slate-800 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  onClick={handleCopy}
+                  className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Text</span>
+                    </>
+                  )}
+                </button>
+
+                <a
+                  href={`sms:${sms.phone}?body=${encodeURIComponent(sms.message)}`}
+                  className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>SMS App</span>
+                </a>
+              </div>
 
               <a
-                href={`sms:${sms.phone}?body=${encodeURIComponent(sms.message)}`}
-                className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow"
+                href={`https://wa.me/91${sms.phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(sms.message)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow cursor-pointer"
               >
-                <Send className="w-3.5 h-3.5" />
-                <span>Open in SMS App</span>
+                <span>💬 Direct WhatsApp Par Bhejein</span>
               </a>
             </div>
           </div>

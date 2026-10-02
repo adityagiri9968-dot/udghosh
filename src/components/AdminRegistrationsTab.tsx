@@ -328,13 +328,27 @@ export const AdminRegistrationsTab: React.FC<AdminRegistrationsTabProps> = ({
                     {/* Phone */}
                     <td className="py-3.5 px-4">
                       {student.phone ? (
-                        <a
-                          href={`tel:${student.phone}`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono border border-slate-700 transition"
-                        >
-                          <Phone className="w-3 h-3 text-emerald-400" />
-                          <span>{student.phone}</span>
-                        </a>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <a
+                            href={`tel:${student.phone}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono border border-slate-700 transition"
+                            title="Call student"
+                          >
+                            <Phone className="w-3 h-3 text-emerald-400" />
+                            <span>{student.phone}</span>
+                          </a>
+                          <a
+                            href={`https://wa.me/91${student.phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
+                              `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${student.name}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा।\n\n🎫 *Roll No:* ${student.roll}\n📚 *Course:* ${student.course || 'HJMC'}\n🛡️ *Pass Status:* ${student.admitted ? '⛔ EXPIRED (Used)' : '✅ ACTIVE (Single-Use)'}\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`
+                            )}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 text-xs font-bold border border-emerald-500/40 transition cursor-pointer"
+                            title="Direct WhatsApp par Message / Pass bhejein"
+                          >
+                            <span>💬 WhatsApp</span>
+                          </a>
+                        </div>
                       ) : (
                         <span className="text-slate-500 text-xs italic">N/A</span>
                       )}

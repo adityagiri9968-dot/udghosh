@@ -401,15 +401,27 @@ export const PassExpiryChecker: React.FC<PassExpiryCheckerProps> = ({
               </button>
 
               {searchResult.student.phone && (
-                <a
-                  href={`sms:${searchResult.student.phone}?body=${encodeURIComponent(
-                    `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${searchResult.student.name}! Aapka fresher party pass (${searchResult.student.roll}) verify ho chuka hai aur ab EXPIRE ho gaya hai.`
-                  )}`}
-                  className="px-2.5 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1.5 transition"
-                >
-                  <Send className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Open in SMS App</span>
-                </a>
+                <>
+                  <a
+                    href={`https://wa.me/91${searchResult.student.phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
+                      `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Portal Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${searchResult.student.name}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन रिकॉर्ड:\n\n🎫 *Roll No:* ${searchResult.student.roll}\n📚 *Course:* ${searchResult.student.course || 'HJMC'}\n🛡️ *Pass Status:* ${searchResult.isExpired ? '⛔ EXPIRED (Gate Entry Completed)' : '✅ ACTIVE (Single-Use Entry Pass)'}\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition shadow cursor-pointer"
+                  >
+                    <span>💬 Direct WhatsApp</span>
+                  </a>
+                  <a
+                    href={`sms:${searchResult.student.phone}?body=${encodeURIComponent(
+                      `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${searchResult.student.name}! Aapka fresher party pass (${searchResult.student.roll}) verify ho chuka hai aur ab EXPIRE ho gaya hai.`
+                    )}`}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-bold flex items-center gap-1.5 transition"
+                  >
+                    <Send className="w-3.5 h-3.5 text-slate-400" />
+                    <span>SMS App</span>
+                  </a>
+                </>
               )}
             </div>
           </div>

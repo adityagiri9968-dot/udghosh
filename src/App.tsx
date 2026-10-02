@@ -2355,8 +2355,18 @@ export default function App() {
                           </button>
                         )}
                         <a
+                          href={`https://wa.me/91${registeredData?.phone}?text=${encodeURIComponent(
+                            `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${registeredData?.name}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। आपका Entry Pass QR Code जनरेट हो चुका है।\n\n🎫 *Roll No:* ${registeredData?.roll}\n📚 *Course:* ${registeredData?.course || 'HJMC'}\n📞 *Phone:* ${registeredData?.phone}\n🆔 *Pass ID:* ${registeredData?.id}\n🛡️ *Pass Status:* ACTIVE (Single-Use Entry Pass)\n\n📌 *Zaroori Soochana:*\n• Entry Gate par ye digital pass dikhana anivarya hai.\n• Gate par scan hote hi pass expire ho jayega. Single-use only!\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`
+                          )}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <span>💬 WhatsApp Par Bhejein</span>
+                        </a>
+                        <a
                           href={`sms:+91${registeredData?.phone}?body=${encodeURIComponent(registrationAlert.sms?.message || 'नमस्ते! आपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। धन्यवाद! - udghosh_hjmc_swagtam_by_Aditya')}`}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow flex items-center gap-1.5"
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition shadow flex items-center gap-1.5"
                         >
                           <Send className="w-3.5 h-3.5" />
                           <span>SMS App</span>
@@ -2565,21 +2575,35 @@ export default function App() {
                 })()}
 
                 {/* Action Buttons */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
-                    onClick={handleDownloadPass}
-                    className="py-3 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-pink-600 to-rose-600 hover:brightness-110 active:scale-[0.98] transition cursor-pointer flex items-center justify-center gap-2 text-sm shadow-lg shadow-pink-600/30"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Download QR / Save Image</span>
-                  </button>
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      onClick={handleDownloadPass}
+                      className="py-3 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-pink-600 to-rose-600 hover:brightness-110 active:scale-[0.98] transition cursor-pointer flex items-center justify-center gap-2 text-sm shadow-lg shadow-pink-600/30"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download QR / Save Image</span>
+                    </button>
+
+                    <a
+                      href={`https://wa.me/91${registeredData.phone}?text=${encodeURIComponent(
+                        `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Portal Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${registeredData.name}*!\nआपकी वेबसाइट पर रजिस्ट्रेशन सफल रहा। आपका Entry Pass QR Code जनरेट हो चुका है।\n\n🎫 *Roll No:* ${registeredData.roll}\n📚 *Course:* ${registeredData.course || 'HJMC'}\n📞 *Phone:* ${registeredData.phone}\n🆔 *Pass ID:* ${registeredData.id}\n🛡️ *Pass Status:* ACTIVE (Single-Use Entry Pass)\n\n📌 *Zaroori Soochana:*\n• Entry Gate par ye digital pass dikhana anivarya hai.\n• Gate par scan hote hi pass expire ho jayega. Single-use only!\n\nधन्यवाद!\n- *udghosh_hjmc_swagtam_by_Aditya*`
+                      )}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="py-3 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 active:scale-[0.98] transition cursor-pointer flex items-center justify-center gap-2 text-sm shadow-lg shadow-emerald-600/30"
+                    >
+                      <span className="text-base">💬</span>
+                      <span>Direct WhatsApp Par Bhejein</span>
+                    </a>
+                  </div>
 
                   <button
                     onClick={handleResetRegistration}
-                    className="py-3 px-4 rounded-xl font-semibold text-slate-200 bg-slate-800 hover:bg-slate-750 border border-slate-700 active:scale-[0.98] transition cursor-pointer flex items-center justify-center gap-2 text-sm"
+                    className="w-full py-2.5 px-4 rounded-xl font-semibold text-slate-200 bg-slate-800 hover:bg-slate-750 border border-slate-700 active:scale-[0.98] transition cursor-pointer flex items-center justify-center gap-2 text-xs sm:text-sm"
                   >
-                    <RefreshCw className="w-4 h-4" />
-                    <span>Naya Registration</span>
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Naya Registration Karein</span>
                   </button>
                 </div>
               </div>
@@ -3099,13 +3123,23 @@ export default function App() {
                                           <span>📱 View Phone SMS</span>
                                         </button>
                                         <a
+                                          href={`https://wa.me/91${scanBanner.details.phone}?text=${encodeURIComponent(
+                                            `🎉 *BRAC HJMC • UDGHOSH FRESHER PARTY 2026* 🎉\n🔐 *Verification:* udghosh_hjmc_swagtam_by_Aditya\n\nनमस्ते *${scanBanner.details?.name}*!\nआपका Fresher Party Pass (${scanBanner.details?.roll}) गेट पर स्कैन होकर वेरीफाई हो चुका है और Gate Entry allow कर दी गई है।\n⛔ *Pass Status:* EXPIRED (Single-Use Completed)\n🕒 *Entry Time:* ${scanBanner.details?.time || 'Verified'}\n\nस्वागतम्! - *udghosh_hjmc_swagtam_by_Aditya*`
+                                          )}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 transition shadow cursor-pointer"
+                                        >
+                                          <span>💬 WhatsApp Par Bhejein</span>
+                                        </a>
+                                        <a
                                           href={`sms:${scanBanner.details.phone}?body=${encodeURIComponent(
                                             scanBanner.details?.smsMessage || `🔐 [UDGHOSH PORTAL OTP / VERIFICATION]: udghosh_hjmc_swagtam_by_Aditya\nNamaste ${scanBanner.details?.name}! Aapka pass scan hokar verify ho chuka hai aur ab EXPIRE ho gaya hai.`
                                           )}`}
-                                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition"
+                                          className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-bold flex items-center gap-1 transition"
                                         >
-                                          <Send className="w-3.5 h-3.5 text-emerald-400" />
-                                          <span>Open in SMS App</span>
+                                          <Send className="w-3.5 h-3.5 text-slate-400" />
+                                          <span>SMS App</span>
                                         </a>
                                       </div>
                                     </div>
@@ -4205,11 +4239,19 @@ export default function App() {
                     <span>📱 View Phone SMS</span>
                   </button>
                   <a
-                    href={`sms:${incomingSmsToast.phone}?body=${encodeURIComponent(incomingSmsToast.message)}`}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-600/40 hover:bg-emerald-600 text-emerald-200 border border-emerald-500/40 text-[10px] font-bold flex items-center gap-1 transition"
+                    href={`https://wa.me/91${incomingSmsToast.phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(incomingSmsToast.message)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 transition shadow cursor-pointer"
                   >
-                    <Send className="w-3 h-3 text-emerald-300" />
-                    <span>Open in SMS App</span>
+                    <span>💬 Direct WhatsApp</span>
+                  </a>
+                  <a
+                    href={`sms:${incomingSmsToast.phone}?body=${encodeURIComponent(incomingSmsToast.message)}`}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[10px] font-bold flex items-center gap-1 transition"
+                  >
+                    <Send className="w-3 h-3 text-slate-400" />
+                    <span>SMS App</span>
                   </a>
                 </div>
               </div>
